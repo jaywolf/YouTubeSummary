@@ -522,6 +522,7 @@ describe("provider failure policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const repair = JSON.parse(String(fetchMock.mock.calls[1]![1].body));
     expect(repair.stream).toBe(false);
+    expect(repair.max_output_tokens).toBe(4_096);
     expect(repair.input).toContain("not-json");
   });
 
@@ -548,6 +549,8 @@ describe("provider failure policy", () => {
       await expect(provider.generate(request, () => undefined, signal()))
         .rejects.toMatchObject({ code: "provider_output_invalid" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
+      const repair = JSON.parse(String(fetchMock.mock.calls[1]![1].body));
+      expect(repair.max_output_tokens).toBe(4_096);
     }
   });
 
@@ -575,6 +578,8 @@ describe("provider failure policy", () => {
       await expect(provider.generate(request, () => undefined, signal()))
         .rejects.toMatchObject({ code: "provider_output_invalid" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
+      const repair = JSON.parse(String(fetchMock.mock.calls[1]![1].body));
+      expect(repair.max_tokens).toBe(4_096);
     }
   });
 

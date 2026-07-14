@@ -25,7 +25,8 @@ import {
   buildSummaryPrompt,
   buildSynthesisPrompt,
   serializeChunkSummaries,
-  serializePrompt
+  serializePrompt,
+  serializeTranscriptSegments
 } from "./prompts";
 
 export type { PipelineProgress } from "../domain/messages";
@@ -149,11 +150,17 @@ export async function runSummaryPipeline({
     const summary = parseFinal(generated, now);
     throwIfAborted(signal);
     onProgress({ phase: "synthesizing", completed: 1, total: 1 });
+    throwIfAborted(signal);
     return summary;
   }
 
   const chunks = chunkTranscript(transcript.segments, dataBudget);
   if (chunks.length === 0) throw contextLimit();
+  for (const chunk of chunks) {
+    if (estimateTokens(serializeTranscriptSegments(chunk)) > dataBudget) {
+      throw contextLimit();
+    }
+  }
   const chunkPrompts = chunks.map((chunk) => buildChunkPrompt({
     video,
     transcript: chunk,
@@ -247,5 +254,6 @@ export async function runSummaryPipeline({
   throwIfAborted(signal);
   completed++;
   onProgress({ phase: "synthesizing", completed, total });
+  throwIfAborted(signal);
   return summary;
 }

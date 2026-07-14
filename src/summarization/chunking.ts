@@ -11,12 +11,25 @@ export const PROMPT_RESERVE_TOKENS = 2_048;
 export const OUTPUT_RESERVE_TOKENS = 4_096;
 export const CONTEXT_SAFETY_RATIO = 0.85;
 export const SEGMENT_OVERLAP_COUNT = 2;
+const MIN_CONTEXT_WINDOW_TOKENS = 8_192;
+const MAX_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 export function estimateTokens(text: string): number {
   return Math.ceil(new TextEncoder().encode(text).byteLength / CHARACTERS_PER_TOKEN);
 }
 
 export function inputBudgetTokens(contextWindowTokens: number): number {
+  if (!Number.isFinite(contextWindowTokens)
+      || !Number.isInteger(contextWindowTokens)
+      || contextWindowTokens < MIN_CONTEXT_WINDOW_TOKENS
+      || contextWindowTokens > MAX_CONTEXT_WINDOW_TOKENS) {
+    throw new AppError({
+      code: "configuration_invalid",
+      retryable: false,
+      safeMessage: "The configured model context limit is invalid.",
+      recoveryAction: "settings"
+    });
+  }
   const budget = Math.floor(contextWindowTokens * CONTEXT_SAFETY_RATIO)
     - PROMPT_RESERVE_TOKENS
     - OUTPUT_RESERVE_TOKENS;

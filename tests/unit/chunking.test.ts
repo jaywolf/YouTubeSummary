@@ -40,6 +40,15 @@ describe("long-video chunking", () => {
     }));
   });
 
+  it.each([NaN, Infinity, -Infinity, 8_192.5, 8_191, 1_000_001])(
+    "rejects invalid context-window value %s",
+    (contextWindowTokens) => {
+      expect(() => inputBudgetTokens(contextWindowTokens)).toThrow(expect.objectContaining({
+        code: "configuration_invalid"
+      }));
+    }
+  );
+
   it("splits only between segments at the exact serialized boundary", () => {
     const segments = [segment(0), segment(1), segment(2), segment(3)];
     const exactTwoSegmentBudget = estimateTokens(serializeTranscriptSegments(segments.slice(0, 2)));

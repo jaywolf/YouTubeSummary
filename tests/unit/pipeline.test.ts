@@ -11,7 +11,11 @@ import {
   OUTPUT_RESERVE_TOKENS
 } from "../../src/summarization/chunking";
 import { runSummaryPipeline, type PipelineProgress } from "../../src/summarization/pipeline";
-import { buildSummaryPrompt, serializePrompt } from "../../src/summarization/prompts";
+import {
+  buildSummaryPrompt,
+  serializePrompt,
+  serializeTranscriptSegments
+} from "../../src/summarization/prompts";
 
 const video = {
   videoId: "aaaaaaaaaaa",
@@ -123,7 +127,7 @@ describe("runSummaryPipeline", () => {
     ]);
   });
 
-  it("accepts an exactly fitting final prompt and chunks one token below", async () => {
+  it("accepts an exactly fitting final prompt and rejects an oversized singleton one token below", async () => {
     const input = transcript([segment(0, "x".repeat(12_000))]);
     const prompt = buildSummaryPrompt({
       video,
@@ -146,9 +150,7 @@ describe("runSummaryPipeline", () => {
     })).resolves.toMatchObject({ overview: ["Overview"] });
     expect(accepted.generate).toHaveBeenCalledOnce();
 
-    const belowBoundary = provider(async (request) =>
-      request.schema === "chunk-summary" ? intermediate(0) : finalContent
-    );
+    const belowBoundary = provider(async () => finalContent);
     await expect(runSummaryPipeline({
       transcript: input,
       video,
@@ -156,9 +158,8 @@ describe("runSummaryPipeline", () => {
       provider: belowBoundary,
       onProgress: vi.fn(),
       signal: new AbortController().signal
-    })).resolves.toMatchObject({ overview: ["Overview"] });
-    expect(vi.mocked(belowBoundary.generate).mock.calls.map(([request]) => request.kind))
-      .toEqual(["chunk", "final"]);
+    })).rejects.toMatchObject({ code: "context_limit_exceeded" });
+    expect(belowBoundary.generate).not.toHaveBeenCalled();
   });
 
   it("JSON-escapes marker-like transcript and metadata strings", async () => {
@@ -212,6 +213,49 @@ describe("runSummaryPipeline", () => {
     const fake = provider(async () => intermediate(0));
     await expect(runSummaryPipeline({
       transcript: transcript([segment(0, "small"), segment(1, "🙂".repeat(10_000))]),
+      video,
+      settings: { ...DEFAULT_SETTINGS, contextWindowTokens: 8_192 },
+      provider: fake,
+      onProgress: vi.fn(),
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({ code: "context_limit_exceeded" });
+    expect(fake.generate).not.toHaveBeenCalled();
+  });
+
+  it("rejects four 877-token singleton chunks against the exact 819-token data budget", async () => {
+    const segments = Array.from({ length: 4 }, (_, index) => segment(index, "x".repeat(3_000)));
+    const budget = inputBudgetTokens(8_192);
+    expect(budget).toBe(819);
+    const chunks = chunkTranscript(segments, budget);
+    expect(chunks).toHaveLength(4);
+    expect(chunks.map((chunk) => estimateTokens(serializeTranscriptSegments(chunk))))
+      .toEqual([877, 877, 877, 877]);
+    const fake = provider(async () => intermediate(0));
+
+    await expect(runSummaryPipeline({
+      transcript: transcript(segments),
+      video,
+      settings: { ...DEFAULT_SETTINGS, contextWindowTokens: 8_192 },
+      provider: fake,
+      onProgress: vi.fn(),
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({ code: "context_limit_exceeded" });
+    expect(fake.generate).not.toHaveBeenCalled();
+  });
+
+  it("preflights a subtle oversized data chunk in a later position before call one", async () => {
+    const segments = [
+      ...Array.from({ length: 4 }, (_, index) => segment(index, "x".repeat(1_800))),
+      segment(4, "x".repeat(3_000))
+    ];
+    const budget = inputBudgetTokens(8_192);
+    const chunks = chunkTranscript(segments, budget);
+    expect(chunks.at(-1)).toEqual([segments.at(-1)]);
+    expect(estimateTokens(serializeTranscriptSegments(chunks.at(-1)!))).toBeGreaterThan(budget);
+    const fake = provider(async () => intermediate(0));
+
+    await expect(runSummaryPipeline({
+      transcript: transcript(segments),
       video,
       settings: { ...DEFAULT_SETTINGS, contextWindowTokens: 8_192 },
       provider: fake,
@@ -388,6 +432,25 @@ describe("runSummaryPipeline", () => {
       onProgress: vi.fn(),
       signal: controller.signal
     })).rejects.toMatchObject({ code: "request_canceled" });
+  });
+
+  it("makes cancellation from the final completion callback win before returning", async () => {
+    const controller = new AbortController();
+    const fake = provider(async () => finalContent);
+
+    await expect(runSummaryPipeline({
+      transcript: transcript([segment(0)]),
+      video,
+      settings: DEFAULT_SETTINGS,
+      provider: fake,
+      onProgress: (progress) => {
+        if (progress.phase === "synthesizing" && progress.completed === progress.total) {
+          controller.abort();
+        }
+      },
+      signal: controller.signal
+    })).rejects.toMatchObject({ code: "request_canceled" });
+    expect(fake.generate).toHaveBeenCalledOnce();
   });
 
   it("makes cancellation win over a rejected map await", async () => {
