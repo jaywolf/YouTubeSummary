@@ -5,7 +5,8 @@ function abortError(signal: AbortSignal): unknown {
 /** Parses the data fields from a UTF-8 server-sent event stream. */
 export async function* parseSse(
   stream: ReadableStream<Uint8Array>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onDone?: () => void
 ): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -41,6 +42,7 @@ export async function* parseSse(
             dataLines = [];
             if (payload === "[DONE]") {
               terminatedByDone = true;
+              onDone?.();
               break;
             }
             yield payload;

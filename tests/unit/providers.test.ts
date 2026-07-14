@@ -3,6 +3,8 @@ import { AppError } from "../../src/domain/errors";
 import { SUMMARY_LIMITATION } from "../../src/domain/summary";
 import type { ProviderConfig } from "../../src/domain/settings";
 import { createProvider } from "../../src/providers/factory";
+import { parseRetryAfter } from "../../src/providers/providerErrors";
+import { targetSchema } from "../../src/providers/types";
 import { buildSummaryPrompt, PROMPT_VERSION } from "../../src/summarization/prompts";
 
 const summaryContent = {
@@ -45,6 +47,48 @@ function chatSuccess(content = JSON.stringify(summaryContent)): Response {
 const signal = () => new AbortController().signal;
 
 describe("OpenAI Responses provider", () => {
+  it("uses recursively strict provider schemas while preserving optional domain timestamps", () => {
+    const jsonSchema = targetSchema("video-summary").jsonSchema;
+    expect(jsonSchema).not.toHaveProperty("$schema");
+
+    const visit = (value: unknown) => {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      if (!value || typeof value !== "object") return;
+      const record = value as Record<string, unknown>;
+      if (record.properties && typeof record.properties === "object") {
+        const propertyNames = Object.keys(record.properties as Record<string, unknown>);
+        expect(record.additionalProperties).toBe(false);
+        expect(record.required).toEqual(propertyNames);
+      }
+      Object.values(record).forEach(visit);
+    };
+    visit(jsonSchema);
+
+    const takeaways = (jsonSchema.properties as Record<string, any>).takeaways;
+    const startSeconds = takeaways.items.properties.startSeconds;
+    expect(startSeconds.anyOf).toContainEqual({ type: "null" });
+  });
+
+  it("normalizes provider null for an optional takeaway timestamp", async () => {
+    const providerValue = {
+      ...summaryContent,
+      takeaways: [{ text: "A practical takeaway.", startSeconds: null }]
+    };
+    const fetchMock = vi.fn(async () => openAiSuccess(JSON.stringify(providerValue)));
+    const provider = createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "gpt-test" },
+      fetchMock as typeof fetch
+    );
+
+    await expect(provider.generate(request, () => undefined, signal())).resolves.toEqual({
+      ...summaryContent,
+      takeaways: [{ text: "A practical takeaway." }]
+    });
+  });
+
   it("sends the native structured-output request and reports progress and usage", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => openAiSuccess());
     const provider = createProvider(
@@ -226,6 +270,30 @@ describe("provider failure policy", () => {
     expect(cappedFetch).toHaveBeenCalledOnce();
   });
 
+  it("clamps huge and far-future Retry-After values to a finite no-retry sentinel", async () => {
+    expect(parseRetryAfter("9".repeat(400))).toBe(61);
+    expect(parseRetryAfter("Fri, 01 Jan 2100 00:00:00 GMT", 0)).toBe(61);
+
+    const sleep = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async () => new Response("", {
+      status: 429,
+      headers: { "Retry-After": "9".repeat(400) }
+    }));
+    const provider = createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "test" },
+      fetchMock as typeof fetch,
+      { sleep }
+    );
+    const caught = await provider.generate(request, () => undefined, signal()).catch((error) => error);
+
+    expect(caught).toBeInstanceOf(AppError);
+    if (!(caught instanceof AppError)) throw new Error("Expected AppError");
+    expect(caught).toMatchObject({ code: "rate_limited", retryAfterSeconds: 61 });
+    expect(Number.isFinite(caught.retryAfterSeconds)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it("does not retry after streamed output bytes", async () => {
     let reads = 0;
     const body = new ReadableStream<Uint8Array>({
@@ -288,6 +356,184 @@ describe("provider failure policy", () => {
     const generation = provider.generate(request, () => undefined, controller.signal);
     controller.abort(new DOMException("Canceled", "AbortError"));
     await expect(generation).rejects.toMatchObject({ code: "request_canceled" });
+  });
+
+  it("maps cancellation during Retry-After sleep to request_canceled", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => new Response("", { status: 429 }));
+    const sleep = vi.fn(async () => {
+      controller.abort(new DOMException("Canceled", "AbortError"));
+      throw controller.signal.reason;
+    });
+    const provider = createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "test" },
+      fetchMock as typeof fetch,
+      { sleep }
+    );
+
+    await expect(provider.generate(request, () => undefined, controller.signal))
+      .rejects.toMatchObject({ code: "request_canceled" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry protocol or stream failures before output", async () => {
+    const cases = [
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response("data: {bad-json}\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" }
+      }),
+      sseResponse([{ type: "response.failed", response: { error: { code: 429 } } }])
+    ];
+
+    for (const response of cases) {
+      const fetchMock = vi.fn(async () => response.clone());
+      const provider = createProvider(
+        { kind: "openai", apiKey: "synthetic", model: "test" },
+        fetchMock as typeof fetch,
+        { sleep: async () => undefined }
+      );
+      await expect(provider.generate(request, () => undefined, signal())).rejects.toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("maps a streamed numeric provider error without automatic retry", async () => {
+    const fetchMock = vi.fn(async () => sseResponse([
+      { type: "response.failed", response: { error: { status: 429, message: "secret detail" } } }
+    ]));
+    const provider = createProvider(
+      { kind: "openai", apiKey: "secret-detail", model: "test" },
+      fetchMock as typeof fetch,
+      { sleep: async () => undefined }
+    );
+
+    const caught = await provider.generate(request, () => undefined, signal()).catch((error) => error);
+    expect(caught).toMatchObject({ code: "rate_limited" });
+    expect(JSON.stringify(caught)).not.toContain("secret detail");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("maps a streamed Chat Completions status without automatic retry", async () => {
+    const fetchMock = vi.fn(async () => sseResponse([
+      { error: { code: 503, message: "private provider detail" } },
+      "[DONE]"
+    ]));
+    const provider = createProvider(
+      { kind: "openrouter", apiKey: "private-provider-detail", model: "vendor/model" },
+      fetchMock as typeof fetch,
+      { sleep: async () => undefined }
+    );
+
+    const caught = await provider.generate(request, () => undefined, signal()).catch((error) => error);
+    expect(caught).toMatchObject({ code: "provider_unavailable" });
+    expect(JSON.stringify(caught)).not.toContain("private provider detail");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("provider terminal events", () => {
+  it("requires response.completed even when truncated OpenAI output is valid JSON", async () => {
+    const fetchMock = vi.fn(async () => sseResponse([
+      { type: "response.output_text.delta", delta: JSON.stringify(summaryContent) }
+    ]));
+    const provider = createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "test" },
+      fetchMock as typeof fetch
+    );
+
+    await expect(provider.generate(request, () => undefined, signal()))
+      .rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects OpenAI output events after response.completed", async () => {
+    const fetchMock = vi.fn(async () => sseResponse([
+      { type: "response.output_text.delta", delta: JSON.stringify(summaryContent) },
+      { type: "response.completed", response: { status: "completed" } },
+      { type: "response.output_text.delta", delta: " " }
+    ]));
+    const provider = createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "test" },
+      fetchMock as typeof fetch
+    );
+
+    await expect(provider.generate(request, () => undefined, signal()))
+      .rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("maps OpenAI incomplete and refusal terminals safely without repair", async () => {
+    const cases = [
+      {
+        event: { type: "response.incomplete", response: { incomplete_details: { reason: "max_output_tokens" } } },
+        code: "provider_output_invalid"
+      },
+      { event: { type: "response.refusal.delta", delta: "unsafe detail" }, code: "content_filtered" },
+      {
+        event: { type: "response.failed", response: { error: { code: "content_filter" } } },
+        code: "content_filtered"
+      },
+      {
+        event: {
+          type: "response.completed",
+          response: {
+            status: "completed",
+            output: [{ content: [{ type: "refusal", refusal: "unsafe detail" }] }]
+          }
+        },
+        code: "content_filtered"
+      }
+    ];
+    for (const { event, code } of cases) {
+      const fetchMock = vi.fn(async () => sseResponse([event]));
+      const provider = createProvider(
+        { kind: "openai", apiKey: "unsafe-detail", model: "test" },
+        fetchMock as typeof fetch
+      );
+      const caught = await provider.generate(request, () => undefined, signal()).catch((error) => error);
+      expect(caught).toMatchObject({ code });
+      expect(JSON.stringify(caught)).not.toContain("unsafe detail");
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("requires Chat Completions DONE even when truncated output is valid JSON", async () => {
+    const fetchMock = vi.fn(async () => sseResponse([
+      { choices: [{ delta: { content: JSON.stringify(summaryContent) }, finish_reason: "stop" }] }
+    ]));
+    const provider = createProvider(
+      { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" },
+      fetchMock as typeof fetch
+    );
+
+    await expect(provider.generate(request, () => undefined, signal()))
+      .rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["length", "provider_output_invalid"],
+    ["content_filter", "content_filtered"],
+    ["refusal", "content_filtered"]
+  ])("maps Chat Completions finish_reason %s to %s", async (finishReason, code) => {
+    const fetchMock = vi.fn(async () => sseResponse([
+      {
+        choices: [{
+          delta: { content: JSON.stringify(summaryContent) },
+          finish_reason: finishReason
+        }]
+      },
+      "[DONE]"
+    ]));
+    const provider = createProvider(
+      { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" },
+      fetchMock as typeof fetch
+    );
+
+    await expect(provider.generate(request, () => undefined, signal()))
+      .rejects.toMatchObject({ code });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 

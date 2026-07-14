@@ -1,12 +1,6 @@
 import { AppError } from "../domain/errors";
+import { isAutomaticRetryEligible } from "./providerErrors";
 import type { Sleep } from "./types";
-
-const RETRYABLE_CODES = new Set([
-  "network_unavailable",
-  "network_timeout",
-  "rate_limited",
-  "provider_unavailable"
-]);
 
 export const defaultSleep: Sleep = async (milliseconds, signal) => {
   if (signal.aborted) throw signal.reason;
@@ -44,7 +38,7 @@ export async function withProviderRetry<T>(
       const mayRetry = attempt === 0
         && outputByteCount() === 0
         && error.retryable
-        && RETRYABLE_CODES.has(error.code)
+        && isAutomaticRetryEligible(error)
         && retryAfter <= 60;
       if (!mayRetry) throw error;
       await sleep(retryAfter * 1_000, signal);

@@ -2,8 +2,10 @@ import { AppError } from "../domain/errors";
 import type { ProviderConfig } from "../domain/settings";
 import {
   normalizeProviderError,
+  providerContentFiltered,
   providerHttpError,
-  providerOutputInvalid
+  providerOutputInvalid,
+  providerStreamError
 } from "./providerErrors";
 import { withProviderRetry } from "./retry";
 import { parseSse } from "./sse";
@@ -52,7 +54,7 @@ function stripSingleJsonFence(value: string): string {
 }
 
 function validateOutput(raw: string, target: TargetSchema): unknown {
-  return target.schema.parse(JSON.parse(stripSingleJsonFence(raw)));
+  return target.schema.parse(target.normalize(JSON.parse(stripSingleJsonFence(raw))));
 }
 
 function invalidProtocol(message: string): AppError {
@@ -236,12 +238,16 @@ export function createOpenAiCompatibleProvider(
         if (response.body === null) throw invalidProtocol("The provider returned an empty stream.");
         onEvent({ type: "connected" });
         let raw = "";
+        let done = false;
         try {
-          for await (const data of parseSse(response.body, signal)) {
+          for await (const data of parseSse(response.body, signal, () => {
+            done = true;
+          })) {
             const event: unknown = JSON.parse(data);
             if (!event || typeof event !== "object") continue;
-            if ((event as { error?: unknown }).error !== undefined) {
-              throw invalidProtocol("The provider could not complete the response.");
+            const streamError = (event as { error?: unknown }).error;
+            if (streamError !== undefined) {
+              throw providerStreamError(streamError);
             }
             const choices = (event as { choices?: unknown }).choices;
             if (Array.isArray(choices)) {
@@ -252,16 +258,30 @@ export function createOpenAiCompatibleProvider(
               const content = delta && typeof delta === "object"
                 ? (delta as { content?: unknown }).content
                 : undefined;
+              const refusal = delta && typeof delta === "object"
+                ? (delta as { refusal?: unknown }).refusal
+                : undefined;
+              if (typeof refusal === "string" && refusal.length > 0) {
+                throw providerContentFiltered();
+              }
               if (typeof content === "string") {
                 raw += content;
                 const count = new TextEncoder().encode(content).byteLength;
                 outputBytes += count;
                 onEvent({ type: "output-bytes", count });
               }
+              const finishReason = first && typeof first === "object"
+                ? (first as { finish_reason?: unknown }).finish_reason
+                : undefined;
+              if (finishReason === "length") throw providerOutputInvalid();
+              if (finishReason === "content_filter" || finishReason === "refusal") {
+                throw providerContentFiltered();
+              }
             }
             const normalizedUsage = usageEvent(event);
             if (normalizedUsage) onEvent(normalizedUsage);
           }
+          if (!done) throw invalidProtocol("The provider stream ended before [DONE].");
           return raw;
         } catch (error) {
           if (signal.aborted) throw normalizeProviderError(canceledError(signal), config.apiKey);
@@ -269,12 +289,17 @@ export function createOpenAiCompatibleProvider(
         }
       };
 
-      const raw = await withProviderRetry(
-        execute,
-        () => outputBytes,
-        signal,
-        dependencies.sleep
-      );
+      let raw: string;
+      try {
+        raw = await withProviderRetry(
+          execute,
+          () => outputBytes,
+          signal,
+          dependencies.sleep
+        );
+      } catch (error) {
+        throw normalizeProviderError(error, config.apiKey);
+      }
       try {
         return validateOutput(raw, target);
       } catch (error) {

@@ -1,9 +1,13 @@
 import { AppError } from "../domain/errors";
 import type { ProviderConfig } from "../domain/settings";
 import {
+  isProviderContentFiltered,
   normalizeProviderError,
+  providerContentFiltered,
   providerHttpError,
-  providerOutputInvalid
+  providerIncomplete,
+  providerOutputInvalid,
+  providerStreamError
 } from "./providerErrors";
 import { withProviderRetry } from "./retry";
 import { parseSse } from "./sse";
@@ -86,7 +90,7 @@ function canceledError(signal: AbortSignal): DOMException {
 }
 
 function validateOutput(raw: string, target: TargetSchema): unknown {
-  return target.schema.parse(JSON.parse(raw));
+  return target.schema.parse(target.normalize(JSON.parse(raw)));
 }
 
 export function createOpenAiResponsesProvider(
@@ -205,8 +209,12 @@ export function createOpenAiResponsesProvider(
         if (response.body === null) throw invalidProtocol("The provider returned an empty stream.");
         onEvent({ type: "connected" });
         let raw = "";
+        let completed = false;
         try {
           for await (const data of parseSse(response.body, signal)) {
+            if (completed) {
+              throw invalidProtocol("The provider sent output after response.completed.");
+            }
             const event: unknown = JSON.parse(data);
             if (!event || typeof event !== "object") continue;
             const type = (event as { type?: unknown }).type;
@@ -219,6 +227,21 @@ export function createOpenAiResponsesProvider(
               onEvent({ type: "output-bytes", count });
             } else if (type === "response.completed") {
               const responsePayload = (event as { response?: unknown }).response;
+              if (isProviderContentFiltered(responsePayload)) {
+                throw providerContentFiltered();
+              }
+              if (responsePayload && typeof responsePayload === "object") {
+                const status = (responsePayload as { status?: unknown }).status;
+                if (status !== undefined && status !== "completed") {
+                  const details = (responsePayload as { incomplete_details?: unknown })
+                    .incomplete_details;
+                  const reason = details && typeof details === "object"
+                    ? (details as { reason?: unknown }).reason
+                    : undefined;
+                  throw providerIncomplete(reason);
+                }
+              }
+              completed = true;
               const usage = responsePayload && typeof responsePayload === "object"
                 ? (responsePayload as { usage?: unknown }).usage
                 : undefined;
@@ -229,9 +252,23 @@ export function createOpenAiResponsesProvider(
                 );
                 if (normalized) onEvent(normalized);
               }
+            } else if (type === "response.incomplete") {
+              const responsePayload = (event as { response?: unknown }).response;
+              const details = responsePayload && typeof responsePayload === "object"
+                ? (responsePayload as { incomplete_details?: unknown }).incomplete_details
+                : undefined;
+              const reason = details && typeof details === "object"
+                ? (details as { reason?: unknown }).reason
+                : undefined;
+              throw providerIncomplete(reason);
+            } else if (type === "response.refusal.delta" || type === "response.refusal.done") {
+              throw providerContentFiltered();
             } else if (type === "error" || type === "response.failed") {
-              throw invalidProtocol("The provider could not complete the response.");
+              throw providerStreamError(event);
             }
+          }
+          if (!completed) {
+            throw invalidProtocol("The provider stream ended before completion.");
           }
           return raw;
         } catch (error) {
@@ -240,12 +277,17 @@ export function createOpenAiResponsesProvider(
         }
       };
 
-      const raw = await withProviderRetry(
-        execute,
-        () => outputBytes,
-        signal,
-        dependencies.sleep
-      );
+      let raw: string;
+      try {
+        raw = await withProviderRetry(
+          execute,
+          () => outputBytes,
+          signal,
+          dependencies.sleep
+        );
+      } catch (error) {
+        throw normalizeProviderError(error, config.apiKey);
+      }
       try {
         return validateOutput(raw, target);
       } catch (error) {

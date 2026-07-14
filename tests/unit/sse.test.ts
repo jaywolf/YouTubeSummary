@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseSse } from "../../src/providers/sse";
 
 function streamFragments(text: string, sizes: number[]): ReadableStream<Uint8Array> {
@@ -40,6 +40,19 @@ describe("parseSse", () => {
 
     expect(await collect(streamFragments(openai, [2, 1, 13, 5]))).toHaveLength(3);
     expect(await collect(streamFragments(openrouter, [3, 8, 1, 2]))).toHaveLength(2);
+  });
+
+  it("reports an explicit DONE terminal without changing emitted payloads", async () => {
+    const terminal = vi.fn();
+    const values: string[] = [];
+    for await (const value of parseSse(
+      streamFragments("data: one\n\ndata: [DONE]\n\n", [1, 4, 2]),
+      new AbortController().signal,
+      terminal
+    )) values.push(value);
+
+    expect(values).toEqual(["one"]);
+    expect(terminal).toHaveBeenCalledOnce();
   });
 
   it("rejects a final unterminated nonempty event", async () => {

@@ -1,4 +1,9 @@
-import { AppError, type AppErrorCode, type RecoveryAction } from "../domain/errors";
+import {
+  AppError,
+  type AppErrorCode,
+  type AppErrorOptions,
+  type RecoveryAction
+} from "../domain/errors";
 
 type ErrorDefinition = {
   code: AppErrorCode;
@@ -40,13 +45,29 @@ const STATUS_ERRORS: Record<number, ErrorDefinition> = {
   }
 };
 
+const automaticRetryErrors = new WeakSet<AppError>();
+
+function appError(options: AppErrorOptions, automaticRetry = false): AppError {
+  const error = new AppError(options);
+  if (automaticRetry) automaticRetryErrors.add(error);
+  return error;
+}
+
+export function isAutomaticRetryEligible(error: AppError): boolean {
+  return automaticRetryErrors.has(error);
+}
+
 export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
   if (value === null) return undefined;
   const trimmed = value.trim();
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return !Number.isFinite(seconds) || seconds > 60 ? 61 : seconds;
+  }
   const date = Date.parse(trimmed);
   if (!Number.isFinite(date)) return undefined;
-  return Math.max(0, Math.ceil((date - now) / 1_000));
+  const seconds = Math.max(0, Math.ceil((date - now) / 1_000));
+  return !Number.isFinite(seconds) || seconds > 60 ? 61 : seconds;
 }
 
 export function redactProviderMessage(value: string, apiKey: string): string {
@@ -55,8 +76,12 @@ export function redactProviderMessage(value: string, apiKey: string): string {
   return redacted;
 }
 
-export function providerHttpError(response: Response): AppError {
-  const definition = STATUS_ERRORS[response.status] ?? (response.status >= 500
+function statusError(
+  status: number,
+  retryAfterSeconds?: number,
+  automaticRetry = false
+): AppError {
+  const definition = STATUS_ERRORS[status] ?? (status >= 500
     ? {
         code: "provider_unavailable" as const,
         retryable: true,
@@ -69,17 +94,88 @@ export function providerHttpError(response: Response): AppError {
         safeMessage: "The provider rejected the request configuration.",
         recoveryAction: "settings" as const
       });
-  const retryAfterSeconds = parseRetryAfter(response.headers.get("Retry-After"));
-  return new AppError({
+  return appError({
     ...definition,
     ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds })
+  }, automaticRetry && (status === 408 || status === 429 || status >= 500));
+}
+
+export function providerHttpError(response: Response): AppError {
+  return statusError(
+    response.status,
+    parseRetryAfter(response.headers.get("Retry-After")),
+    true
+  );
+}
+
+export function providerContentFiltered(): AppError {
+  return appError({
+    code: "content_filtered",
+    retryable: false,
+    safeMessage: "The provider could not return this summary because of a safety policy.",
+    recoveryAction: "change_model"
+  });
+}
+
+function looksFiltered(value: unknown): boolean {
+  if (typeof value === "string") {
+    return /content[_ -]?filter|safety|refusal/i.test(value);
+  }
+  if (!value || typeof value !== "object") return false;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (/content[_ -]?filter|refusal/i.test(key) && entry !== null && entry !== false) return true;
+    if (/code|type|reason|finish_reason/i.test(key) && looksFiltered(entry)) return true;
+    if (entry && typeof entry === "object" && looksFiltered(entry)) return true;
+  }
+  return false;
+}
+
+export function isProviderContentFiltered(value: unknown): boolean {
+  return looksFiltered(value);
+}
+
+function numericStatus(value: unknown, depth = 0): number | null {
+  if (depth > 3 || !value || typeof value !== "object") return null;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (/^(status|status_code|code)$/i.test(key)) {
+      const status = typeof entry === "number"
+        ? entry
+        : typeof entry === "string" && /^\d{3}$/.test(entry) ? Number(entry) : NaN;
+      if (Number.isInteger(status) && status >= 100 && status <= 599) return status;
+    }
+    const nested = numericStatus(entry, depth + 1);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+export function providerStreamError(value: unknown): AppError {
+  if (isProviderContentFiltered(value)) return providerContentFiltered();
+  const status = numericStatus(value);
+  if (status !== null) return statusError(status);
+  return appError({
+    code: "provider_unavailable",
+    retryable: true,
+    safeMessage: "The provider could not complete the response.",
+    recoveryAction: "retry"
+  });
+}
+
+export function providerIncomplete(reason: unknown): AppError {
+  if (isProviderContentFiltered(reason)) return providerContentFiltered();
+  if (reason === "max_output_tokens") return providerOutputInvalid();
+  return appError({
+    code: "provider_unavailable",
+    retryable: true,
+    safeMessage: "The provider ended the response before it was complete.",
+    recoveryAction: "retry"
   });
 }
 
 export function normalizeProviderError(error: unknown, apiKey: string): AppError {
   if (error instanceof AppError) return error;
   if (error instanceof DOMException && error.name === "AbortError") {
-    return new AppError({
+    return appError({
       code: "request_canceled",
       retryable: false,
       safeMessage: "Summary generation was canceled.",
@@ -88,15 +184,15 @@ export function normalizeProviderError(error: unknown, apiKey: string): AppError
     });
   }
   if (error instanceof TypeError) {
-    return new AppError({
+    return appError({
       code: "network_unavailable",
       retryable: true,
       safeMessage: "The provider could not be reached. Check the network and provider URL.",
       recoveryAction: "retry",
       cause: error
-    });
+    }, true);
   }
-  return new AppError({
+  return appError({
     code: "provider_unavailable",
     retryable: true,
     safeMessage: redactProviderMessage("The provider response could not be processed.", apiKey),
@@ -106,7 +202,7 @@ export function normalizeProviderError(error: unknown, apiKey: string): AppError
 }
 
 export function providerOutputInvalid(cause?: Error): AppError {
-  return new AppError({
+  return appError({
     code: "provider_output_invalid",
     retryable: true,
     safeMessage: "The model returned an invalid summary. Retry or choose another model.",

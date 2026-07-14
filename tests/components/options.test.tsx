@@ -211,6 +211,11 @@ describe("options settings", () => {
 
     expect(await screen.findByText("Connected")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledOnce();
+
+    await userEvent.clear(screen.getByLabelText("Model ID"));
+    await userEvent.type(screen.getByLabelText("Model ID"), "changed-model");
+    expect(screen.queryByText("Connected")).toBeNull();
+    expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
   });
 
   it("shows only a mapped safe connection error", async () => {
@@ -224,5 +229,40 @@ describe("options settings", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("rejected the saved API key");
     expect(document.body.textContent).not.toContain("stored-synthetic-key");
+  });
+
+  it("requires saving a changed model before testing the connection", async () => {
+    const repository = memoryRepository(parseSettings({
+      provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "saved-model" }
+    }));
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    const testButton = await screen.findByRole("button", { name: "Test connection" });
+    expect((testButton as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.clear(screen.getByLabelText("Model ID"));
+    await userEvent.type(screen.getByLabelText("Model ID"), "dirty-model");
+
+    expect((testButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
+  });
+
+  it("requires saving a changed custom base URL before testing the connection", async () => {
+    const repository = memoryRepository(parseSettings({
+      provider: {
+        kind: "custom",
+        apiKey: "stored-synthetic-key",
+        model: "saved-model",
+        baseUrl: "https://saved.example/v1"
+      }
+    }));
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    const testButton = await screen.findByRole("button", { name: "Test connection" });
+    expect((testButton as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.clear(screen.getByLabelText("Base URL"));
+    await userEvent.type(screen.getByLabelText("Base URL"), "https://dirty.example/v1");
+
+    expect((testButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
   });
 });

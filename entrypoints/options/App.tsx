@@ -70,6 +70,15 @@ function customUrlError(baseUrl: string): string | null {
   }
 }
 
+function providerFormMatchesSaved(
+  form: SettingsForm,
+  savedProvider: ProviderConfig | null
+): boolean {
+  if (savedProvider === null || form.providerKind !== savedProvider.kind) return false;
+  if (form.model !== savedProvider.model || form.replacingKey) return false;
+  return savedProvider.kind !== "custom" || form.baseUrl === savedProvider.baseUrl;
+}
+
 type CredentialControlsProps = {
   needsKey: boolean;
   hasSavedKey: boolean;
@@ -171,6 +180,7 @@ export function App({
     && savedProvider?.kind === form.providerKind;
   const needsKey = form.providerKind !== "none" && (!hasSavedKey || form.replacingKey);
   const providerRemovalPending = savedProvider !== null && form.providerKind === "none";
+  const providerFieldsAreSaved = providerFormMatchesSaved(form, savedProvider);
   const baseUrlError = form.providerKind === "custom" ? customUrlError(form.baseUrl) : null;
   const contextTokens = Number(form.contextWindowTokens);
   const contextIsValid = Number.isInteger(contextTokens)
@@ -206,6 +216,15 @@ export function App({
       disclosureAccepted: false,
       replacingKey: false
     }));
+  }
+
+  function editProviderField(update: Partial<Pick<SettingsForm, "model" | "baseUrl">>) {
+    connectionAbortRef.current?.abort();
+    connectionAbortRef.current = null;
+    setTestingConnection(false);
+    setError(null);
+    setStatus(null);
+    setForm((current) => ({ ...current, ...update }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -293,7 +312,7 @@ export function App({
   }
 
   async function handleTestConnection() {
-    if (savedProvider === null || savedProvider.kind !== form.providerKind || form.replacingKey) {
+    if (!providerFieldsAreSaved || savedProvider === null) {
       return;
     }
     connectionAbortRef.current?.abort();
@@ -385,10 +404,7 @@ export function App({
                       placeholder="https://llm.example/v1"
                       value={form.baseUrl}
                       aria-describedby={baseUrlError ? "base-url-error" : undefined}
-                      onChange={(event) => setForm((current) => ({
-                        ...current,
-                        baseUrl: event.target.value
-                      }))}
+                      onChange={(event) => editProviderField({ baseUrl: event.target.value })}
                     />
                     {baseUrlError ? <small id="base-url-error" role="alert">{baseUrlError}</small> : null}
                   </label>
@@ -400,10 +416,7 @@ export function App({
                     type="text"
                     aria-label="Model ID"
                     value={form.model}
-                    onChange={(event) => setForm((current) => ({
-                      ...current,
-                      model: event.target.value
-                    }))}
+                    onChange={(event) => editProviderField({ model: event.target.value })}
                   />
                 </label>
 
@@ -430,12 +443,14 @@ export function App({
                   <button
                     type="button"
                     className="secondary"
-                    disabled={testingConnection || !hasSavedKey || form.replacingKey}
+                    disabled={testingConnection || !providerFieldsAreSaved}
                     onClick={handleTestConnection}
                   >
                     {testingConnection ? "Testing…" : "Test connection"}
                   </button>
-                  <small>Tests the provider and model using the saved key.</small>
+                  <small>{providerFieldsAreSaved
+                    ? "Tests the provider and model using the saved key."
+                    : "Save provider changes before testing this connection."}</small>
                 </div>
               </div>
             ) : null}
