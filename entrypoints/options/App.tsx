@@ -199,12 +199,16 @@ export function App({
     && contextIsValid
     && form.outputLanguage.trim().length > 0;
 
-  function selectProvider(providerKind: ProviderKind) {
+  function cancelConnectionTest() {
     connectionAbortRef.current?.abort();
     connectionAbortRef.current = null;
     setTestingConnection(false);
     setError(null);
     setStatus(null);
+  }
+
+  function selectProvider(providerKind: ProviderKind) {
+    cancelConnectionTest();
     setForm((current) => ({
       ...current,
       providerKind,
@@ -219,20 +223,22 @@ export function App({
   }
 
   function editProviderField(update: Partial<Pick<SettingsForm, "model" | "baseUrl">>) {
-    connectionAbortRef.current?.abort();
-    connectionAbortRef.current = null;
-    setTestingConnection(false);
-    setError(null);
-    setStatus(null);
+    cancelConnectionTest();
+    setForm((current) => ({ ...current, ...update }));
+  }
+
+  function editCredentialField(
+    update: Partial<Pick<SettingsForm, "apiKey" | "disclosureAccepted" | "replacingKey">>
+  ) {
+    cancelConnectionTest();
     setForm((current) => ({ ...current, ...update }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSave) return;
+    cancelConnectionTest();
     setSaving(true);
-    setError(null);
-    setStatus(null);
 
     try {
       let provider: ProviderConfig | null = null;
@@ -278,9 +284,8 @@ export function App({
 
   async function handleClearCredentials() {
     if (!window.confirm("Clear the saved provider key from this device?")) return;
+    cancelConnectionTest();
     setSaving(true);
-    setError(null);
-    setStatus(null);
     try {
       const cleared = await settingsRepository.clearCredentials();
       setSavedSettings(cleared);
@@ -295,9 +300,8 @@ export function App({
 
   async function handleResetSettings() {
     if (!window.confirm("Reset all stored settings and remove any saved provider key?")) return;
+    cancelConnectionTest();
     setSaving(true);
-    setError(null);
-    setStatus(null);
     try {
       const reset = await settingsRepository.reset();
       setSavedSettings(reset);
@@ -315,7 +319,7 @@ export function App({
     if (!providerFieldsAreSaved || savedProvider === null) {
       return;
     }
-    connectionAbortRef.current?.abort();
+    cancelConnectionTest();
     const controller = new AbortController();
     connectionAbortRef.current = controller;
     setTestingConnection(true);
@@ -425,17 +429,15 @@ export function App({
                   hasSavedKey={hasSavedKey}
                   apiKey={form.apiKey}
                   disclosureAccepted={form.disclosureAccepted}
-                  onApiKeyChange={(apiKey) => setForm((current) => ({ ...current, apiKey }))}
-                  onDisclosureChange={(disclosureAccepted) => setForm((current) => ({
-                    ...current,
+                  onApiKeyChange={(apiKey) => editCredentialField({ apiKey })}
+                  onDisclosureChange={(disclosureAccepted) => editCredentialField({
                     disclosureAccepted
-                  }))}
-                  onReplace={() => setForm((current) => ({
-                    ...current,
+                  })}
+                  onReplace={() => editCredentialField({
                     apiKey: "",
                     disclosureAccepted: false,
                     replacingKey: true
-                  }))}
+                  })}
                   onClear={handleClearCredentials}
                 />
 

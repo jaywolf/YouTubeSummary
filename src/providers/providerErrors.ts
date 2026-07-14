@@ -29,7 +29,7 @@ const STATUS_ERRORS: Record<number, ErrorDefinition> = {
     code: "provider_forbidden",
     retryable: false,
     safeMessage: "The provider denied access to this model or request.",
-    recoveryAction: "change_model"
+    recoveryAction: "settings"
   },
   408: {
     code: "network_timeout",
@@ -113,7 +113,7 @@ export function providerContentFiltered(): AppError {
     code: "content_filtered",
     retryable: false,
     safeMessage: "The provider could not return this summary because of a safety policy.",
-    recoveryAction: "change_model"
+    recoveryAction: "none"
   });
 }
 

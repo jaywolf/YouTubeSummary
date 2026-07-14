@@ -265,4 +265,30 @@ describe("options settings", () => {
     expect((testButton as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
   });
+
+  it.each(["Replace key", "Clear key"])(
+    "aborts a pending connection test before %s mutates credentials",
+    async (action) => {
+      let requestSignal: AbortSignal | null = null;
+      const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) =>
+        await new Promise<Response>((_resolve, reject) => {
+          requestSignal = init?.signal as AbortSignal;
+          requestSignal.addEventListener("abort", () => reject(requestSignal?.reason), { once: true });
+        }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const repository = memoryRepository(parseSettings({
+        provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "saved-model" }
+      }));
+      render(<App settingsRepository={repository} permissions={permissions()} />);
+
+      await userEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+      expect(screen.getByRole("button", { name: "Testing…" })).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: action }));
+
+      await vi.waitFor(() => expect(requestSignal?.aborted).toBe(true));
+      expect(screen.queryByText("Connected")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Testing…" })).toBeNull();
+    }
+  );
 });

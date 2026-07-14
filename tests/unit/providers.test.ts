@@ -210,13 +210,13 @@ describe("OpenAI-compatible providers", () => {
 
 describe("provider failure policy", () => {
   it.each([
-    [401, "credentials_rejected"],
-    [402, "insufficient_credits"],
-    [403, "provider_forbidden"],
-    [408, "network_timeout"],
-    [429, "rate_limited"],
-    [503, "provider_unavailable"]
-  ])("maps HTTP %i to %s without exposing response bodies", async (status, code) => {
+    [401, "credentials_rejected", "settings"],
+    [402, "insufficient_credits", "settings"],
+    [403, "provider_forbidden", "settings"],
+    [408, "network_timeout", "retry"],
+    [429, "rate_limited", "retry"],
+    [503, "provider_unavailable", "retry"]
+  ])("maps HTTP %i to %s without exposing response bodies", async (status, code, recoveryAction) => {
     const fetchMock = vi.fn(async () => new Response("Bearer secret-body-token", { status }));
     const provider = createProvider(
       { kind: "openai", apiKey: "secret-body-token", model: "test" },
@@ -226,7 +226,7 @@ describe("provider failure policy", () => {
 
     const caught = await provider.generate(request, () => undefined, signal()).catch((error: unknown) => error);
     expect(caught).toBeInstanceOf(AppError);
-    expect(caught).toMatchObject({ code });
+    expect(caught).toMatchObject({ code, recoveryAction });
     expect(JSON.stringify(caught)).not.toContain("secret-body-token");
   });
 
@@ -492,7 +492,10 @@ describe("provider terminal events", () => {
         fetchMock as typeof fetch
       );
       const caught = await provider.generate(request, () => undefined, signal()).catch((error) => error);
-      expect(caught).toMatchObject({ code });
+      expect(caught).toMatchObject({
+        code,
+        ...(code === "content_filtered" ? { recoveryAction: "none" } : {})
+      });
       expect(JSON.stringify(caught)).not.toContain("unsafe detail");
       expect(fetchMock).toHaveBeenCalledOnce();
     }
@@ -532,7 +535,10 @@ describe("provider terminal events", () => {
     );
 
     await expect(provider.generate(request, () => undefined, signal()))
-      .rejects.toMatchObject({ code });
+      .rejects.toMatchObject({
+        code,
+        ...(code === "content_filtered" ? { recoveryAction: "none" } : {})
+      });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
