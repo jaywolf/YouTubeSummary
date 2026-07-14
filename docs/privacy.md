@@ -14,7 +14,7 @@ The complete settings record contains:
 
 - selected provider (`openai`, `openrouter`, or `custom`), or no provider;
 - the provider API key;
-- the user-entered model ID;
+- the exact provider model ID selected from the authenticated OpenAI/OpenRouter catalog, or entered manually for a custom provider or advanced fallback;
 - the validated custom base URL for a custom provider;
 - preferred caption language, or automatic selection;
 - output-language instruction;
@@ -46,10 +46,12 @@ Closing the side panel does not intentionally cancel active work. Browser servic
 
 ## Data sent to the selected provider
 
+When OpenAI or OpenRouter is selected, the Settings page sends an authenticated model-catalog request to that provider after the user accepts the local-key disclosure. The request contains the API key in an authorization header but no video metadata, captions, transcript, prompt, or summary. Catalog responses are used in memory to populate the model chooser and are not persisted as a separate model list; only the selected exact model ID is saved with the provider settings.
+
 Summary requests send only to the provider selected in Settings:
 
 - the saved API key in an authorization header;
-- the user-entered model ID;
+- the selected exact provider model ID;
 - system instructions and the required structured-output schema;
 - video title, channel name when available, and video ID;
 - caption text with segment start times and durations, either in one request or sequential chunks; and
@@ -75,8 +77,8 @@ The production manifest declares these extension and host permissions:
 | `storage` | Stores local settings, the BYOK credential, the bounded summary cache, and transient session job identity. |
 | `scripting` | Executes a minimal main-world function in the active YouTube tab to read and sanitize player caption-track metadata that is unavailable to the isolated content script. |
 | `https://www.youtube.com/*` | Runs the YouTube content script on supported pages, reads the active video context, obtains caption data, handles SPA navigation, and seeks the player when a timestamp is selected. |
-| `https://api.openai.com/*` | Sends connection tests and summary requests when OpenAI is selected. |
-| `https://openrouter.ai/*` | Sends connection tests and summary requests when OpenRouter is selected. |
+| `https://api.openai.com/*` | Loads the authenticated model catalog and sends connection tests and summary requests when OpenAI is selected. |
+| `https://openrouter.ai/*` | Loads the authenticated compatible-text model catalog and sends connection tests and summary requests when OpenRouter is selected. |
 
 The manifest also declares `https://*/*`, `http://localhost/*`, and `http://127.0.0.1/*` as **optional** host permissions. Declaring the `https://*/*` option is necessary because a user may choose any HTTPS custom-provider host and Chrome requires possible optional origins to be declared in advance.
 

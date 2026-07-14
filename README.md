@@ -53,17 +53,19 @@ Rebuild and reload the extension from the browser's extensions page after source
 
 ## Configure a provider
 
-Open the extension's **Settings** page, select a provider, enter a model ID and API key, accept the local-key disclosure, then save. A saved key cannot be revealed or copied from the UI; it can only be replaced or cleared. **Test connection** becomes available after the provider settings are saved.
+Open the extension's **Settings** page, select a provider, enter an API key, accept the local-key disclosure, choose a model, then save. For OpenAI and OpenRouter, the model chooser is loaded directly from that provider's authenticated models API; the extension displays a readable name and stores the provider's exact model ID internally. A saved key cannot be revealed or copied from the UI; it can only be replaced or cleared. **Test connection** becomes available after the provider settings are saved.
+
+The extension never ships a static OpenAI or OpenRouter model list. Use **Refresh models** to query the selected provider again. If a valid model is absent from the returned catalog, enable **Use a model not shown** and enter its exact ID as an advanced fallback.
 
 Use a dedicated restricted key with a low spending limit when the provider supports those controls. Extension local storage is not a secret vault.
 
 ### OpenAI
 
-Select **OpenAI**, then supply an OpenAI API key and a Responses API-compatible model ID. Requests use the fixed `https://api.openai.com/v1/responses` endpoint.
+Select **OpenAI**, supply an OpenAI API key, accept the disclosure, and choose from the catalog returned by authenticated `GET https://api.openai.com/v1/models`. Summary and connection-test requests use the fixed `https://api.openai.com/v1/responses` endpoint.
 
 ### OpenRouter
 
-Select **OpenRouter**, then supply an OpenRouter API key and model slug. Requests use the fixed OpenRouter Chat Completions endpoint. Model discovery is not built into this MVP, so enter the slug manually.
+Select **OpenRouter**, supply an OpenRouter API key, accept the disclosure, and choose from the text-model catalog returned by authenticated `GET https://openrouter.ai/api/v1/models?output_modalities=text&supported_parameters=response_format&sort=most-popular`. Summary and connection-test requests use the fixed OpenRouter Chat Completions endpoint.
 
 ### Custom OpenAI-compatible endpoint
 

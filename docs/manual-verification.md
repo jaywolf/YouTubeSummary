@@ -48,10 +48,10 @@ Use public or explicitly authorized test videos. Do not record transcript conten
 
 | Input | URL or fixture | Notes |
 | --- | --- | --- |
-| Human-captioned standard watch video | Not recorded | Must use `https://www.youtube.com/watch?v=<11-character-id>`. |
-| Automatic-caption standard watch video | Not recorded | Record the caption label shown in the panel, not transcript text. |
-| Video with no captions | Not recorded | Expected to show a captions-unavailable recovery state. |
-| Long captioned video | Not recorded | Must exceed the configured single-request budget and show chunk progress. |
+| Human-captioned standard watch video | `https://www.youtube.com/watch?v=iG9CE55wbtY` | Reconfirm that a human caption track is still available immediately before the run. |
+| Automatic-caption standard watch video | `https://www.youtube.com/watch?v=Z1wrAhvanRU` | Reconfirm the automatic caption label immediately before the run; record the label, not transcript text. |
+| Video with no captions | `https://www.youtube.com/watch?v=aqz-KE-bpKQ` | Reconfirm that captions remain unavailable; expected to show a captions-unavailable recovery state. |
+| Long captioned video | `https://www.youtube.com/watch?v=8mAITcNt710` | Reconfirm captions, then lower the configured context enough to force visible mapping progress. |
 | SPA navigation video A and video B | Not recorded | Both must be standard watch pages. |
 | Dedicated restricted live-provider key | Not recorded | Optional; record only provider/key label, never the value. |
 | Local rate-limit mock | Not recorded | Custom endpoint that returns HTTP 429 and a safe retry response. |
@@ -62,6 +62,9 @@ Evidence can be a screenshot filename, screen recording timestamp, console captu
 
 | Done | Check | Chrome result | Brave result | Evidence / notes |
 | --- | --- | --- | --- | --- |
+| - [ ] | **OpenAI model catalog:** enter a dedicated OpenAI key, accept the disclosure, and verify the readable model chooser loads from the authenticated provider API; refresh it and save a selection without exposing the key or requiring a typed model ID. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **OpenRouter model catalog:** enter a dedicated OpenRouter key, accept the disclosure, and verify the readable compatible-text model chooser loads from the authenticated provider API; refresh it and save a selection without exposing the key or requiring a typed model ID. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Advanced model fallback:** enable **Use a model not shown**, verify an exact provider ID can be entered manually, then disable it and verify the API-backed chooser returns. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **Human captions:** open the human-captioned watch page, click the action, and verify a complete summary identifies the selected human caption track. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **Automatic captions:** summarize the automatic-caption video and verify the panel marks the caption track as automatic. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **No captions:** open the no-caption video and verify the panel reports that captions are unavailable without making a provider summary request. | NOT RUN | NOT RUN | Not recorded |
