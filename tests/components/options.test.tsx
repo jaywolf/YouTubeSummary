@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../entrypoints/options/App";
 import {
   DEFAULT_SETTINGS,
@@ -10,14 +10,21 @@ import {
 import type { PermissionsAdapter } from "../../src/platform/permissions";
 import type { SettingsRepository } from "../../src/platform/storage";
 
+afterEach(() => vi.restoreAllMocks());
+
 function memoryRepository(initial: ExtensionSettings = DEFAULT_SETTINGS): SettingsRepository & {
   clear: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
   saved: ExtensionSettings[];
 } {
   let settings = initial;
   const saved: ExtensionSettings[] = [];
   const clear = vi.fn(async () => {
     settings = { ...settings, provider: null };
+    return settings;
+  });
+  const reset = vi.fn(async () => {
+    settings = { ...DEFAULT_SETTINGS };
     return settings;
   });
   return {
@@ -30,7 +37,21 @@ function memoryRepository(initial: ExtensionSettings = DEFAULT_SETTINGS): Settin
       settings = next;
       saved.push(next);
     },
-    clearCredentials: clear
+    clearCredentials: clear,
+    reset
+  };
+}
+
+function invalidRepository() {
+  const save = vi.fn(async () => undefined);
+  const reset = vi.fn(async () => ({ ...DEFAULT_SETTINGS }));
+  return {
+    load: vi.fn(async (): Promise<ExtensionSettings> => {
+      throw new Error("synthetic malformed settings");
+    }),
+    save,
+    clearCredentials: vi.fn(async () => ({ ...DEFAULT_SETTINGS })),
+    reset
   };
 }
 
@@ -123,5 +144,47 @@ describe("options settings", () => {
     await vi.waitFor(() => expect(
       (screen.getByRole("combobox", { name: "Provider" }) as HTMLSelectElement).value
     ).toBe("none"));
+  });
+
+  it("blocks ordinary save after malformed storage and requires confirmed reset", async () => {
+    const repository = invalidRepository();
+    const confirm = vi.spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Stored settings");
+    expect(screen.queryByRole("button", { name: "Save settings" })).toBeNull();
+    expect(repository.save).not.toHaveBeenCalled();
+
+    const reset = screen.getByRole("button", { name: "Reset stored settings" });
+    await userEvent.click(reset);
+    expect(repository.reset).not.toHaveBeenCalled();
+    await userEvent.click(reset);
+
+    expect(repository.reset).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("button", { name: "Save settings" })).toBeTruthy();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it("cannot remove a saved provider through ordinary Save", async () => {
+    const repository = memoryRepository(parseSettings({
+      provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "test-model" }
+    }));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    await userEvent.selectOptions(
+      await screen.findByRole("combobox", { name: "Provider" }),
+      "none"
+    );
+
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect(repository.saved).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Clear saved provider" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(repository.clear).toHaveBeenCalledOnce();
+    expect(repository.saved).toHaveLength(0);
   });
 });

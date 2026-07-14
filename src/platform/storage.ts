@@ -17,6 +17,7 @@ export type SettingsRepository = {
   load(): Promise<ExtensionSettings>;
   save(settings: ExtensionSettings): Promise<void>;
   clearCredentials(): Promise<ExtensionSettings>;
+  reset(): Promise<ExtensionSettings>;
 };
 
 export async function loadSettings(
@@ -43,8 +44,17 @@ export async function clearCredentials(
   return cleared;
 }
 
+export async function resetSettings(
+  storage: StorageAreaAdapter = browser.storage.local
+): Promise<ExtensionSettings> {
+  const reset = { ...DEFAULT_SETTINGS };
+  await saveSettings(reset, storage);
+  return reset;
+}
+
 export const browserSettingsRepository: SettingsRepository = {
   load: () => loadSettings(),
   save: (settings) => saveSettings(settings),
-  clearCredentials: () => clearCredentials()
+  clearCredentials: () => clearCredentials(),
+  reset: () => resetSettings()
 };

@@ -9,6 +9,9 @@ export type PermissionsAdapter = {
 
 export function customOriginPattern(baseUrl: string): string {
   const url = new URL(validateCustomBaseUrl(baseUrl));
+  if (url.hostname.includes("*")) {
+    throw new Error("Provider hostnames cannot contain wildcards.");
+  }
   if (url.protocol === "http:" && url.hostname === "localhost") {
     return "http://localhost/*";
   }

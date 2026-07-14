@@ -36,9 +36,22 @@ function normalizedPath(url: URL): string {
 }
 
 export function validateCustomBaseUrl(value: string): string {
+  const input = value.trim();
+  const schemeSeparator = input.indexOf("://");
+  const authority = schemeSeparator < 0
+    ? ""
+    : input.slice(schemeSeparator + 3).split(/[/?#]/, 1)[0] ?? "";
+
+  if (authority.includes("@")) {
+    throw new Error("Provider URLs cannot contain credentials.");
+  }
+  if (input.includes("?") || input.includes("#")) {
+    throw new Error("Provider URLs cannot contain a query or fragment.");
+  }
+
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(input);
   } catch {
     throw new Error("Enter a valid provider base URL.");
   }
@@ -48,6 +61,9 @@ export function validateCustomBaseUrl(value: string): string {
   }
   if (url.search || url.hash) {
     throw new Error("Provider URLs cannot contain a query or fragment.");
+  }
+  if (url.hostname.includes("*")) {
+    throw new Error("Provider hostnames cannot contain wildcards.");
   }
 
   const isLocalHttp = url.protocol === "http:"

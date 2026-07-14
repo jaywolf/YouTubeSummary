@@ -137,6 +137,7 @@ export function App({
   const [savedSettings, setSavedSettings] = useState<ExtensionSettings | null>(null);
   const [form, setForm] = useState<SettingsForm>(() => formFromSettings(DEFAULT_SETTINGS));
   const [loading, setLoading] = useState(true);
+  const [storageInvalid, setStorageInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -147,10 +148,12 @@ export function App({
       if (!active) return;
       setSavedSettings(settings);
       setForm(formFromSettings(settings));
+      setStorageInvalid(false);
       setLoading(false);
     }).catch(() => {
       if (!active) return;
       setError("Stored settings are invalid. Clear or repair them before continuing.");
+      setStorageInvalid(true);
       setLoading(false);
     });
     return () => {
@@ -162,6 +165,7 @@ export function App({
   const hasSavedKey = form.providerKind !== "none"
     && savedProvider?.kind === form.providerKind;
   const needsKey = form.providerKind !== "none" && (!hasSavedKey || form.replacingKey);
+  const providerRemovalPending = savedProvider !== null && form.providerKind === "none";
   const baseUrlError = form.providerKind === "custom" ? customUrlError(form.baseUrl) : null;
   const contextTokens = Number(form.contextWindowTokens);
   const contextIsValid = Number.isInteger(contextTokens)
@@ -174,6 +178,8 @@ export function App({
   );
   const canSave = !loading
     && !saving
+    && !storageInvalid
+    && !providerRemovalPending
     && providerIsValid
     && contextIsValid
     && form.outputLanguage.trim().length > 0;
@@ -260,6 +266,24 @@ export function App({
     }
   }
 
+  async function handleResetSettings() {
+    if (!window.confirm("Reset all stored settings and remove any saved provider key?")) return;
+    setSaving(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const reset = await settingsRepository.reset();
+      setSavedSettings(reset);
+      setForm(formFromSettings(reset));
+      setStorageInvalid(false);
+      setStatus("Stored settings reset.");
+    } catch {
+      setError("Stored settings could not be reset.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <main className="settings-shell">
       <header>
@@ -268,7 +292,21 @@ export function App({
         <p className="intro">Connect your own provider and choose how summaries are generated.</p>
       </header>
 
-      {loading ? <p>Loading settings…</p> : (
+      {loading ? <p>Loading settings…</p> : storageInvalid ? (
+        <section className="settings-card recovery-card" role="alert">
+          <h2>Stored settings need attention</h2>
+          <p>{error ?? "Stored settings are invalid and cannot be edited safely."}</p>
+          <p>Ordinary saving is blocked so existing credential data is not overwritten.</p>
+          <button
+            type="button"
+            className="danger"
+            disabled={saving}
+            onClick={handleResetSettings}
+          >
+            {saving ? "Resetting…" : "Reset stored settings"}
+          </button>
+        </section>
+      ) : (
         <form onSubmit={handleSubmit}>
           <section className="settings-card" aria-labelledby="provider-heading">
             <div className="section-heading">
@@ -291,6 +329,15 @@ export function App({
                 <option value="custom">Custom OpenAI-compatible</option>
               </select>
             </label>
+
+            {providerRemovalPending ? (
+              <div className="provider-removal" role="note">
+                <p>Removing a saved provider requires confirmation and clears its key.</p>
+                <button type="button" className="danger" onClick={handleClearCredentials}>
+                  Clear saved provider
+                </button>
+              </div>
+            ) : null}
 
             {form.providerKind !== "none" ? (
               <div className="provider-fields">

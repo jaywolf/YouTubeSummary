@@ -9,6 +9,7 @@ import {
   SETTINGS_STORAGE_KEY,
   clearCredentials,
   loadSettings,
+  resetSettings,
   saveSettings,
   type StorageAreaAdapter
 } from "../../src/platform/storage";
@@ -61,6 +62,22 @@ describe("provider settings", () => {
     expect(() => validateCustomBaseUrl("https://example.com/v1#fragment")).toThrow();
   });
 
+  it.each([
+    "https://*/v1",
+    "https://*.example.com/v1"
+  ])("rejects wildcard hostname %s before a permission pattern can be derived", (baseUrl) => {
+    expect(() => validateCustomBaseUrl(baseUrl)).toThrow(/wildcard/i);
+    expect(() => customOriginPattern(baseUrl)).toThrow(/wildcard/i);
+  });
+
+  it.each([
+    "https://@example.com/v1",
+    "https://example.com/v1?",
+    "https://example.com/v1#"
+  ])("rejects a syntactically present empty forbidden component in %s", (baseUrl) => {
+    expect(() => validateCustomBaseUrl(baseUrl)).toThrow();
+  });
+
   it("redacts key text without dropping safe provider details", () => {
     const redacted = redactSettings(parseSettings({
       provider: {
@@ -103,6 +120,17 @@ describe("settings storage", () => {
     await clearCredentials(storage);
     await expect(loadSettings(storage)).resolves.toEqual({ ...settings, provider: null });
   });
+
+  it("deliberately resets malformed stored settings to safe defaults", async () => {
+    const storage = memoryStorage({
+      [SETTINGS_STORAGE_KEY]: {
+        provider: { kind: "openai", apiKey: "malformed-synthetic-key", model: "" }
+      }
+    });
+
+    await expect(resetSettings(storage)).resolves.toEqual(DEFAULT_SETTINGS);
+    await expect(loadSettings(storage)).resolves.toEqual(DEFAULT_SETTINGS);
+  });
 });
 
 describe("custom origin permissions", () => {
@@ -136,6 +164,18 @@ describe("custom origin permissions", () => {
       contains,
       request
     })).resolves.toBe(true);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("never checks or requests permission for a wildcard hostname", async () => {
+    const contains = vi.fn(async () => false);
+    const request = vi.fn(async () => true);
+
+    await expect(ensureCustomOriginPermission("https://*.example.com/v1", {
+      contains,
+      request
+    })).rejects.toThrow(/wildcard/i);
+    expect(contains).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
   });
 });
