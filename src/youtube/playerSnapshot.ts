@@ -87,7 +87,10 @@ export function isAllowedCaptionUrl(url: URL, testMode: boolean): boolean {
   return testMode && url.protocol === "http:" && url.hostname === "127.0.0.1";
 }
 
-function sanitizeCaptionTrack(value: unknown, testMode: boolean): CaptionTrack | null {
+function sanitizeCaptionTrack(
+  value: unknown,
+  allowCaptionUrl: (url: URL) => boolean
+): CaptionTrack | null {
   if (!isRecord(value) || typeof value.baseUrl !== "string" ||
       typeof value.languageCode !== "string" || value.languageCode === "") {
     return null;
@@ -99,7 +102,7 @@ function sanitizeCaptionTrack(value: unknown, testMode: boolean): CaptionTrack |
   } catch {
     return null;
   }
-  if (!isAllowedCaptionUrl(captionUrl, testMode)) return null;
+  if (!allowCaptionUrl(captionUrl)) return null;
 
   const id = typeof value.vssId === "string" && value.vssId !== ""
     ? value.vssId
@@ -113,7 +116,10 @@ function sanitizeCaptionTrack(value: unknown, testMode: boolean): CaptionTrack |
   };
 }
 
-export function sanitizePlayerSnapshot(value: unknown, testMode: boolean): VideoContext | null {
+function sanitizePlayerSnapshotWithPolicy(
+  value: unknown,
+  allowCaptionUrl: (url: URL) => boolean
+): VideoContext | null {
   if (!isRecord(value) || !isRecord(value.videoDetails)) return null;
 
   const details = value.videoDetails;
@@ -140,7 +146,7 @@ export function sanitizePlayerSnapshot(value: unknown, testMode: boolean): Video
     ? renderer.captionTracks
     : [];
   const captionTracks = rawTracks
-    .map((track) => sanitizeCaptionTrack(track, testMode))
+    .map((track) => sanitizeCaptionTrack(track, allowCaptionUrl))
     .filter((track): track is CaptionTrack => track !== null);
 
   const context = {
@@ -155,14 +161,27 @@ export function sanitizePlayerSnapshot(value: unknown, testMode: boolean): Video
   return result.success ? result.data : null;
 }
 
+/** Unit-test seam for the strict production sanitizer and its compile-time test policy. */
+export function sanitizePlayerSnapshot(value: unknown, testMode: boolean): VideoContext | null {
+  return sanitizePlayerSnapshotWithPolicy(value, (url) => isAllowedCaptionUrl(url, testMode));
+}
+
+function sanitizeBuildPlayerSnapshot(value: unknown): VideoContext | null {
+  return sanitizePlayerSnapshotWithPolicy(value, (url) => {
+    if (url.origin === "https://www.youtube.com") return true;
+    return import.meta.env.WXT_TEST_MODE === "1"
+      && url.protocol === "http:"
+      && url.hostname === "127.0.0.1";
+  });
+}
+
 export async function readVideoContextFromTab(
-  tabId: number,
-  testMode: boolean
+  tabId: number
 ): Promise<VideoContext | null> {
   const results = await browser.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
     func: readPlayerSnapshotInPage
   });
-  return sanitizePlayerSnapshot(results[0]?.result, testMode);
+  return sanitizeBuildPlayerSnapshot(results[0]?.result);
 }

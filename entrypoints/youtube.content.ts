@@ -6,8 +6,12 @@ import {
 } from "../src/youtube/contentRuntime";
 import { extractTranscript } from "../src/youtube/extractTranscript";
 
+const contentMatches = import.meta.env.WXT_TEST_MODE === "1"
+  ? ["https://www.youtube.com/*", "http://127.0.0.1/*"]
+  : ["https://www.youtube.com/*"];
+
 export default defineContentScript({
-  matches: ["https://www.youtube.com/*"],
+  matches: contentMatches,
   main() {
     const controllers = new Map<string, AbortController>();
     const browserDependencies = createBrowserTranscriptDependencies();

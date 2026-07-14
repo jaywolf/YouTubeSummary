@@ -11,7 +11,7 @@ import type {
   TranscriptPreference,
   VideoContext
 } from "../domain/video";
-import { parseWatchUrl } from "../domain/video";
+import { parseExtensionWatchUrl } from "../domain/watchIdentity";
 import type { ProviderClient } from "../providers/types";
 import type { SummaryPipelineInput } from "../summarization/pipeline";
 import { PROMPT_VERSION } from "../summarization/prompts";
@@ -227,14 +227,14 @@ export class SummaryController {
 
   async start(request: StartSummaryRequest): Promise<JobSnapshot | null> {
     const reservation = this.#reserve(request);
-    let identity = parseWatchUrl("");
+    let identity = parseExtensionWatchUrl("");
     let settings: ExtensionSettings;
     let context: VideoContext;
 
     try {
       const tab = await this.dependencies.getTab(request.tabId);
       if (!this.#isReserved(request.tabId, reservation)) return this.status(request.tabId);
-      identity = typeof tab.url === "string" ? parseWatchUrl(tab.url) : null;
+      identity = typeof tab.url === "string" ? parseExtensionWatchUrl(tab.url) : null;
       if (tab.id !== request.tabId || tab.active !== true || identity === null) {
         return this.#preflightFailure(
           request,

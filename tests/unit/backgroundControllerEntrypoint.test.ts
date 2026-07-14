@@ -74,6 +74,28 @@ describe("background controller entrypoint", () => {
     expect(controller.navigated).not.toHaveBeenCalled();
   });
 
+  it("accepts a trusted YouTube navigation away from a watch page", async () => {
+    const module = await importBackground();
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn(async () => undefined)
+    };
+    const listener = module.createBackgroundMessageListener(controller as never);
+
+    expect(listener({
+      type: "youtube/navigated",
+      requestId: "navigation-away",
+      tabId: 0,
+      videoId: null
+    }, {
+      id: "extension-id",
+      tab: { id: 91, url: "https://www.youtube.com/feed/subscriptions" }
+    }, vi.fn())).toBe(true);
+    await vi.waitFor(() => expect(controller.navigated).toHaveBeenCalledWith(91, null));
+  });
+
   it("trusts authoritative sender.tab.url instead of the non-authoritative sender URL", async () => {
     const module = await importBackground();
     const controller = {

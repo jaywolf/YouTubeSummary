@@ -7,11 +7,11 @@ import {
   type BackgroundEvent
 } from "../src/domain/messages";
 import {
-  parseWatchUrl,
   type Transcript,
   type TranscriptPreference,
   type VideoContext
 } from "../src/domain/video";
+import { parseExtensionWatchUrl } from "../src/domain/watchIdentity";
 import { createProvider } from "../src/providers/factory";
 import { browserActiveJobStore, browserSettingsRepository } from "../src/platform/storage";
 import { browserSummaryCache } from "../src/platform/cache";
@@ -63,10 +63,7 @@ export async function extractTranscriptFromTab(
 ): Promise<{ context: VideoContext; transcript: Transcript }> {
   let context: VideoContext | null;
   try {
-    context = await readVideoContextFromTab(
-      tabId,
-      import.meta.env.WXT_TEST_MODE === "1"
-    );
+    context = await readVideoContextFromTab(tabId);
   } catch (error) {
     throw transcriptExtractionError(error);
   }
@@ -134,7 +131,12 @@ function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender 
 } {
   if (sender.id !== browser.runtime.id || !Number.isInteger(sender.tab?.id)) return false;
   try {
-    return new URL(sender.tab?.url ?? "").origin === "https://www.youtube.com";
+    const url = new URL(sender.tab?.url ?? "");
+    if (url.origin === "https://www.youtube.com") return true;
+    return import.meta.env.WXT_TEST_MODE === "1"
+      && url.protocol === "http:"
+      && url.hostname === "127.0.0.1"
+      && url.port !== "";
   } catch {
     return false;
   }
@@ -167,7 +169,7 @@ export function createBackgroundMessageListener(
 
     const response: Promise<unknown> = ready.then(async (): Promise<unknown> => {
       if (message.type === "youtube/navigated") {
-        const identity = parseWatchUrl(sender.tab!.url ?? "");
+        const identity = parseExtensionWatchUrl(sender.tab!.url ?? "");
         return await controller.navigated(sender.tab!.id!, identity?.videoId ?? null);
       }
       if (message.type === "panel/start") return await controller.start(message);
@@ -192,10 +194,7 @@ export default defineBackground(() => {
   const hub = createPanelEventHub();
   const controller = new SummaryController({
     getTab: (tabId) => browser.tabs.get(tabId),
-    readVideoContext: (tabId) => readVideoContextFromTab(
-      tabId,
-      import.meta.env.WXT_TEST_MODE === "1"
-    ),
+    readVideoContext: (tabId) => readVideoContextFromTab(tabId),
     loadSettings: () => browserSettingsRepository.load(),
     extractTranscript: (tabId, requestId, context, preference) =>
       extractTranscriptWithContext(tabId, requestId, context, preference),

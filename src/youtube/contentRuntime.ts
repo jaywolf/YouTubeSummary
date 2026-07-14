@@ -10,7 +10,7 @@ import {
   extractTranscript,
   type TranscriptDependencies
 } from "./extractTranscript";
-import { parseWatchUrl } from "../domain/video";
+import { parseExtensionWatchUrl } from "../domain/watchIdentity";
 import { readVisibleTranscript } from "./visibleTranscript";
 
 type ExtractTranscript = typeof extractTranscript;
@@ -78,9 +78,14 @@ export function createYouTubeMessageHandler(
     }
 
     if (message.type === "youtube/seek") {
-      if (parseWatchUrl(location.href)?.videoId !== message.videoId) return undefined;
+      if (parseExtensionWatchUrl(location.href)?.videoId !== message.videoId) return undefined;
       const video = dependencies.findVideo();
-      if (video !== null) video.currentTime = message.seconds;
+      if (video !== null) {
+        video.currentTime = message.seconds;
+        if (import.meta.env.WXT_TEST_MODE === "1") {
+          video.dataset.wxtSeekSeconds = String(message.seconds);
+        }
+      }
       return undefined;
     }
 
@@ -159,7 +164,7 @@ export async function sendYouTubeNavigation(
   requestId: string,
   sendMessage: NavigationSender
 ): Promise<void> {
-  const identity = parseWatchUrl(url);
+  const identity = parseExtensionWatchUrl(url);
   await sendMessage({
     type: "youtube/navigated",
     requestId,

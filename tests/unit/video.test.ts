@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseWatchUrl } from "../../src/domain/video";
+import { parseExtensionWatchUrl } from "../../src/domain/watchIdentity";
 
 describe("YouTube video identity", () => {
   it("accepts only a standard watch URL with an 11-character id", () => {
@@ -25,5 +26,12 @@ describe("YouTube video identity", () => {
       videoId: "abc_DEF-123",
       canonicalUrl: "https://www.youtube.com/watch?v=abc_DEF-123"
     });
+  });
+
+  it("keeps the extension-facing production parser strict", () => {
+    expect(parseExtensionWatchUrl("https://www.youtube.com/watch?v=abcdefghijk"))
+      .toEqual(parseWatchUrl("https://www.youtube.com/watch?v=abcdefghijk"));
+    expect(parseExtensionWatchUrl("http://127.0.0.1:43123/watch?v=abcdefghijk"))
+      .toBeNull();
   });
 });

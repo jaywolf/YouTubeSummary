@@ -147,7 +147,7 @@ describe("background snapshot bridge", () => {
     }]);
     vi.stubGlobal("browser", { scripting: { executeScript } });
 
-    await expect(readVideoContextFromTab(23, false)).resolves.toMatchObject({
+    await expect(readVideoContextFromTab(23)).resolves.toMatchObject({
       videoId: "abcdefghijk",
       captionTracks: [{ baseUrl: "https://www.youtube.com/api/timedtext?v=1" }]
     });
@@ -163,6 +163,6 @@ describe("background snapshot bridge", () => {
       scripting: { executeScript: vi.fn(async () => [{ frameId: 0, result: null }]) }
     });
 
-    await expect(readVideoContextFromTab(23, false)).resolves.toBeNull();
+    await expect(readVideoContextFromTab(23)).resolves.toBeNull();
   });
 });

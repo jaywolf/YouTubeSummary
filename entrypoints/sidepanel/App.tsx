@@ -15,7 +15,7 @@ import {
   completedSummaryPayloadSchema,
   type CompletedSummaryPayload
 } from "../../src/domain/summary";
-import { parseWatchUrl } from "../../src/domain/video";
+import { parseExtensionWatchUrl } from "../../src/domain/watchIdentity";
 
 type PanelTab = {
   id?: number | undefined;
@@ -333,7 +333,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       const tab: PanelTab = await client.queryActiveTab().catch(() => ({}));
       if (!mountedRef.current) return;
       const tabId = tab.id;
-      const identity = typeof tab.url === "string" ? parseWatchUrl(tab.url) : null;
+      const identity = typeof tab.url === "string" ? parseExtensionWatchUrl(tab.url) : null;
       if (!Number.isInteger(tabId) || identity === null) {
         const requestId = client.createRequestId();
         setSnapshot(unsupportedSnapshot(typeof tabId === "number" ? tabId : 0, requestId));
@@ -379,7 +379,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   async function seek(result: CompletedSummaryPayload, seconds: number) {
     if (snapshot?.state !== "complete" || result.video.videoId !== snapshot.videoId) return;
     const tab: PanelTab = await client.getTab(snapshot.tabId).catch(() => ({}));
-    const identity = typeof tab.url === "string" ? parseWatchUrl(tab.url) : null;
+    const identity = typeof tab.url === "string" ? parseExtensionWatchUrl(tab.url) : null;
     if (tab.id !== snapshot.tabId || tab.active !== true
         || identity?.videoId !== result.video.videoId) return;
     await client.sendTabMessage(snapshot.tabId, {

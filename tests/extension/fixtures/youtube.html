@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Packaged video fixture</title>
+</head>
+<body>
+  <main>
+    <h1 id="title">Fixture video</h1>
+    <div id="channel">Synthetic Channel</div>
+    <div id="movie_player"></div>
+    <video aria-label="Fixture video player"></video>
+  </main>
+  <script>
+    (() => {
+      const videos = {
+        aaaaaaaaaaa: { title: "Fixture Video A", channel: "Synthetic Channel A" },
+        bbbbbbbbbbb: { title: "Fixture Video B", channel: "Synthetic Channel B" }
+      };
+      let seekSeconds = 0;
+      const player = document.querySelector("#movie_player");
+      const video = document.querySelector("video");
+      Object.defineProperty(video, "currentTime", {
+        configurable: true,
+        get: () => seekSeconds,
+        set: (value) => {
+          seekSeconds = Number(value);
+          video.dataset.currentTime = String(seekSeconds);
+        }
+      });
+
+      function videoId() {
+        return new URL(location.href).searchParams.get("v") || "aaaaaaaaaaa";
+      }
+
+      function render() {
+        const id = videoId();
+        const metadata = videos[id] || videos.aaaaaaaaaaa;
+        document.querySelector("#title").textContent = metadata.title;
+        document.querySelector("#channel").textContent = metadata.channel;
+        document.title = metadata.title;
+      }
+
+      player.getPlayerResponse = () => {
+        const id = videoId();
+        const metadata = videos[id] || videos.aaaaaaaaaaa;
+        return {
+          videoDetails: {
+            videoId: id,
+            title: metadata.title,
+            author: metadata.channel,
+            lengthSeconds: "180"
+          },
+          captions: {
+            playerCaptionsTracklistRenderer: {
+              captionTracks: [{
+                baseUrl: `${location.origin}/captions?v=${id}`,
+                languageCode: "en",
+                vssId: ".en",
+                name: { simpleText: "English fixture captions" }
+              }]
+            }
+          }
+        };
+      };
+
+      window.navigateFixture = (id) => {
+        history.pushState({}, "", `/watch?v=${id}`);
+        seekSeconds = 0;
+        render();
+        document.dispatchEvent(new Event("yt-navigate-finish"));
+      };
+      window.fixtureSeekSeconds = () => Number(video.dataset.wxtSeekSeconds || seekSeconds);
+      render();
+    })();
+  </script>
+</body>
+</html>

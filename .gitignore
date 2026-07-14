@@ -2,6 +2,7 @@
 .pi/
 node_modules/
 .output/
+.output-test/
 .wxt/
 coverage/
 playwright-report/
