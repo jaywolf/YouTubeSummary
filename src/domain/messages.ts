@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { APP_ERROR_CODES, type SafeAppError } from "./errors";
+import { APP_ERROR_CODES, RECOVERY_ACTIONS, type SafeAppError } from "./errors";
 import type { CompletedSummaryPayload } from "./summary";
 import {
   transcriptPreferenceSchema,
@@ -76,7 +76,7 @@ const safeAppErrorSchema = z.object({
   code: z.enum(APP_ERROR_CODES),
   retryable: z.boolean(),
   safeMessage: z.string(),
-  recoveryAction: z.enum(["retry", "settings", "change_model", "none"]),
+  recoveryAction: z.enum(RECOVERY_ACTIONS),
   retryAfterSeconds: z.number().finite().nonnegative().optional()
 }).strict();
 

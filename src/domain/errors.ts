@@ -23,7 +23,9 @@ export const APP_ERROR_CODES = [
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
 
-export type RecoveryAction = "retry" | "settings" | "change_model" | "none";
+export const RECOVERY_ACTIONS = ["retry", "settings", "change_model", "none"] as const;
+
+export type RecoveryAction = (typeof RECOVERY_ACTIONS)[number];
 export type SafeAppError = {
   code: AppErrorCode;
   retryable: boolean;

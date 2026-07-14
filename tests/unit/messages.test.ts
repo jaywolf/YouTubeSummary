@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   APP_ERROR_CODES,
   ERROR_PRESENTATIONS,
-  type AppErrorCode
+  RECOVERY_ACTIONS,
+  type AppErrorCode,
+  type RecoveryAction
 } from "../../src/domain/errors";
 import {
   parseAppMessage,
@@ -156,6 +158,30 @@ describe("parseTranscriptResponse", () => {
       retryable: false,
       safeMessage: "Safe message",
       recoveryAction: "none"
+    })).toThrow();
+  });
+
+  it("accepts every shared recovery action at runtime", () => {
+    const typedActions: readonly RecoveryAction[] = RECOVERY_ACTIONS;
+
+    expect(typedActions).toEqual(["retry", "settings", "change_model", "none"]);
+    expect(typedActions).toHaveLength(new Set(typedActions).size);
+    for (const recoveryAction of typedActions) {
+      expect(parseTranscriptResponse({
+        code: "internal_error",
+        retryable: recoveryAction === "retry",
+        safeMessage: "Safe message",
+        recoveryAction
+      })).toHaveProperty("recoveryAction", recoveryAction);
+    }
+  });
+
+  it("rejects a recovery action outside the shared tuple", () => {
+    expect(() => parseTranscriptResponse({
+      code: "internal_error",
+      retryable: false,
+      safeMessage: "Safe message",
+      recoveryAction: "reload"
     })).toThrow();
   });
 
