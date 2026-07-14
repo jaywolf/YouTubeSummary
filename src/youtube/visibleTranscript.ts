@@ -26,7 +26,7 @@ export function readVisibleTranscript(root: ParentNode = document): TranscriptSe
       ? ".ytwTranscriptSegmentViewModelTimestamp"
       : ".segment-timestamp, [id='segment-timestamp'], [id='segment-time']")?.textContent;
     const text = renderer.querySelector(modern
-      ? "span.ytAttributedStringHost[role='text'], .ytAttributedStringHost[role='text'], .yt-core-attributed-string[role='text'], span[role='text']"
+      ? "span.ytAttributedStringHost[role='text'], .ytAttributedStringHost[role='text'], .yt-core-attributed-string[role='text']"
       : ".segment-text, [id='segment-text']")?.textContent;
     if (timestamp === undefined || text === undefined || timestamp === null || text === null) {
       continue;
@@ -115,10 +115,11 @@ function transcriptPanels(root: ParentNode, visibleOnly: boolean): Element[] {
   const candidates = [...root.querySelectorAll(TRANSCRIPT_PANEL_SELECTOR)];
   for (const row of root.querySelectorAll("transcript-segment-view-model")) {
     const modernContainer = row.closest([
-      "yt-section-list-renderer",
       "ytd-engagement-panel-section-list-renderer",
       "ytd-transcript-renderer"
-    ].join(","));
+    ].join(","))
+      // Some view-model layouts omit a transcript-specific outer renderer.
+      ?? row.closest("yt-section-list-renderer");
     if (modernContainer !== null) candidates.push(modernContainer);
   }
 

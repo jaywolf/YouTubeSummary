@@ -185,6 +185,25 @@ describe("visible transcript parsing", () => {
     ]);
   });
 
+  it("ignores a hidden modern transcript when a current panel is visible", async () => {
+    const fixture = readFileSync("tests/fixtures/visible-transcript-modern.html", "utf8");
+    const hidden = fixture
+      .replace("<ytd-engagement-panel-section-list-renderer>",
+        "<ytd-engagement-panel-section-list-renderer hidden>")
+      .replaceAll("Modern first segment", "Hidden first segment")
+      .replaceAll("Modern second segment", "Hidden second segment");
+    document.body.innerHTML = hidden + fixture;
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal
+    )).resolves.toEqual([
+      { startSeconds: 0, durationSeconds: 9, text: "Modern first segment" },
+      { startSeconds: 9, durationSeconds: 0, text: "Modern second segment" }
+    ]);
+  });
+
   it("opens YouTube's transcript section when segments are not rendered yet", async () => {
     document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
       <button type="button">Show transcript</button>
