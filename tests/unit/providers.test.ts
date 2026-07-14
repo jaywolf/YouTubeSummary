@@ -139,6 +139,50 @@ describe("OpenAI Responses provider", () => {
     expect(JSON.stringify(body)).not.toMatch(/transcript|BEGIN TRANSCRIPT/i);
   });
 
+  it("accepts only the OpenAI max-output-token incomplete envelope as a valid connection", async () => {
+    const accepted = vi.fn(async () => new Response(JSON.stringify({
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+      output: []
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    await expect(createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "gpt-test" },
+      accepted as typeof fetch
+    ).testConnection(signal())).resolves.toBeUndefined();
+
+    const rejected = [
+      {
+        payload: { status: "incomplete", incomplete_details: { reason: "content_filter" } },
+        code: "content_filtered"
+      },
+      {
+        payload: { status: "incomplete", incomplete_details: { reason: "other" } },
+        code: "provider_unavailable"
+      },
+      {
+        payload: { status: "failed", error: { status: 429, message: "private detail" } },
+        code: "rate_limited"
+      },
+      { payload: { status: "completed", output: [] }, code: "provider_output_invalid" }
+    ];
+    for (const { payload, code } of rejected) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+      const caught = await createProvider(
+        { kind: "openai", apiKey: "private-detail", model: "gpt-test" },
+        fetchMock as typeof fetch
+      ).testConnection(signal()).catch((error) => error);
+      expect(caught).toMatchObject({ code });
+      expect(JSON.stringify(caught)).not.toContain("private detail");
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
   it("rejects a connection response with an unexpected content type", async () => {
     const fetchMock = vi.fn(async () => new Response("{\"output_text\":\"{\\\"ok\\\":true}\"}", {
       status: 200,
@@ -217,6 +261,44 @@ describe("OpenAI-compatible providers", () => {
       additionalProperties: false
     });
     expect(JSON.stringify(body)).not.toMatch(/transcript|BEGIN TRANSCRIPT/i);
+  });
+
+  it("accepts only the Chat length envelope as a capped connection response", async () => {
+    for (const content of ["", "{\"ok\":"]) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+        choices: [{ message: { content }, finish_reason: "length" }]
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+      await expect(createProvider(
+        { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" },
+        fetchMock as typeof fetch
+      ).testConnection(signal())).resolves.toBeUndefined();
+    }
+
+    const rejected = [
+      {
+        payload: { choices: [{ message: { content: "" }, finish_reason: "content_filter" }] },
+        code: "content_filtered"
+      },
+      { payload: { error: { status: 403, message: "private detail" } }, code: "provider_forbidden" },
+      { payload: { choices: [] }, code: "provider_output_invalid" },
+      { payload: { choices: [{ finish_reason: "length" }] }, code: "provider_output_invalid" }
+    ];
+    for (const { payload, code } of rejected) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+      const caught = await createProvider(
+        { kind: "openrouter", apiKey: "private-detail", model: "vendor/model" },
+        fetchMock as typeof fetch
+      ).testConnection(signal()).catch((error) => error);
+      expect(caught).toMatchObject({ code });
+      expect(JSON.stringify(caught)).not.toContain("private detail");
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
   });
 });
 

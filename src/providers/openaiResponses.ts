@@ -115,20 +115,27 @@ export function createOpenAiResponsesProvider(
     }
   }
 
+  async function nonstreamedPayload(
+    body: Record<string, unknown>,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    const response = await post(body, signal);
+    try {
+      requireContentType(response, "application/json");
+      return await response.json();
+    } catch (error) {
+      throw normalizeProviderError(error, config.apiKey);
+    }
+  }
+
   async function nonstreamedText(
     body: Record<string, unknown>,
     signal: AbortSignal
   ): Promise<string> {
-    const response = await post(body, signal);
-    try {
-      requireContentType(response, "application/json");
-      const payload: unknown = await response.json();
-      const text = outputText(payload);
-      if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
-      return text;
-    } catch (error) {
-      throw normalizeProviderError(error, config.apiKey);
-    }
+    const payload = await nonstreamedPayload(body, signal);
+    const text = outputText(payload);
+    if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
+    return text;
   }
 
   async function repair(
@@ -166,7 +173,7 @@ export function createOpenAiResponsesProvider(
         required: ["ok"],
         additionalProperties: false
       };
-      const raw = await nonstreamedText({
+      const payload = await nonstreamedPayload({
         model: config.model,
         stream: false,
         store: false,
@@ -182,6 +189,22 @@ export function createOpenAiResponsesProvider(
           }
         }
       }, signal);
+      if (payload && typeof payload === "object") {
+        const status = (payload as { status?: unknown }).status;
+        if (status === "incomplete") {
+          const details = (payload as { incomplete_details?: unknown }).incomplete_details;
+          const reason = details && typeof details === "object"
+            ? (details as { reason?: unknown }).reason
+            : undefined;
+          if (reason === "max_output_tokens") return;
+          throw providerIncomplete(reason);
+        }
+        if (status === "failed" || (payload as { error?: unknown }).error !== undefined) {
+          throw providerStreamError(payload);
+        }
+      }
+      const raw = outputText(payload);
+      if (raw === null) throw providerOutputInvalid();
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);

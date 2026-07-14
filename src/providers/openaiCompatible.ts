@@ -139,20 +139,27 @@ export function createOpenAiCompatibleProvider(
     }
   }
 
+  async function nonstreamedPayload(
+    body: Record<string, unknown>,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    const response = await post(body, signal);
+    try {
+      requireContentType(response, "application/json");
+      return await response.json();
+    } catch (error) {
+      throw normalizeProviderError(error, config.apiKey);
+    }
+  }
+
   async function nonstreamedText(
     body: Record<string, unknown>,
     signal: AbortSignal
   ): Promise<string> {
-    const response = await post(body, signal);
-    try {
-      requireContentType(response, "application/json");
-      const payload: unknown = await response.json();
-      const text = completionText(payload);
-      if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
-      return text;
-    } catch (error) {
-      throw normalizeProviderError(error, config.apiKey);
-    }
+    const payload = await nonstreamedPayload(body, signal);
+    const text = completionText(payload);
+    if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
+    return text;
   }
 
   async function repair(
@@ -200,7 +207,7 @@ export function createOpenAiCompatibleProvider(
           additionalProperties: false
         }
       };
-      const raw = await nonstreamedText({
+      const payload = await nonstreamedPayload({
         model: config.model,
         stream: false,
         max_tokens: 16,
@@ -210,6 +217,22 @@ export function createOpenAiCompatibleProvider(
         ],
         ...formatBody(connectionTarget)
       }, signal);
+      let finishReason: unknown;
+      if (payload && typeof payload === "object") {
+        const streamError = (payload as { error?: unknown }).error;
+        if (streamError !== undefined) throw providerStreamError(streamError);
+        const choices = (payload as { choices?: unknown }).choices;
+        const first = Array.isArray(choices) ? choices[0] : undefined;
+        finishReason = first && typeof first === "object"
+          ? (first as { finish_reason?: unknown }).finish_reason
+          : undefined;
+        if (finishReason === "content_filter" || finishReason === "refusal") {
+          throw providerContentFiltered();
+        }
+      }
+      const raw = completionText(payload);
+      if (raw === null) throw providerOutputInvalid();
+      if (finishReason === "length") return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(stripSingleJsonFence(raw));
