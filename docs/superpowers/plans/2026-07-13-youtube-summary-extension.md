@@ -29,7 +29,7 @@
 ### Extension entrypoints
 
 - **entrypoints/background.ts** — service-worker bootstrap, action-to-side-panel behavior, trusted storage access, message routing, and navigation cancellation.
-- **entrypoints/youtube.content.ts** — YouTube page adapter for context, transcript extraction, navigation notices, and seek commands.
+- **entrypoints/youtube.content.ts** — isolated-world YouTube adapter for caption extraction, visible-transcript fallback, navigation notices, and seek commands.
 - **entrypoints/sidepanel/index.html**, **main.tsx**, **App.tsx**, **styles.css** — side-panel application and visual states.
 - **entrypoints/options/index.html**, **main.tsx**, **App.tsx**, **styles.css** — provider, model, caption, cache, and credential settings.
 
@@ -96,7 +96,7 @@
 - Test: **tests/unit/messages.test.ts**
 
 **Interfaces:**
-- Produces: AppMessage, BackgroundEvent, parseAppMessage(value: unknown): AppMessage, AppError, and stable AppErrorCode values.
+- Produces: AppMessage, BackgroundEvent, JobState, parseAppMessage(value: unknown): AppMessage, AppError, and stable AppErrorCode values.
 - Produces: sidepanel.html and options.html entrypoints plus a Manifest V3 service worker.
 
 - [ ] **Step 1: Add the toolchain manifest and ignore generated output**
@@ -263,6 +263,7 @@ Create src/domain/messages.ts:
 
 ~~~ts
 import { z } from "zod";
+import type { SafeAppError } from "./errors";
 
 const base = { requestId: z.string().min(1), tabId: z.number().int().nonnegative() };
 
@@ -270,26 +271,67 @@ export const appMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("panel/start"), ...base, force: z.boolean() }),
   z.object({ type: z.literal("panel/cancel"), ...base }),
   z.object({ type: z.literal("panel/status"), ...base }),
-  z.object({ type: z.literal("youtube/context"), ...base }),
-  z.object({ type: z.literal("youtube/extract"), ...base }),
   z.object({ type: z.literal("youtube/seek"), ...base, seconds: z.number().nonnegative() }),
   z.object({ type: z.literal("youtube/navigated"), ...base, videoId: z.string().nullable() })
 ]);
 
 export type AppMessage = z.infer<typeof appMessageSchema>;
 
+export type JobState =
+  | "loading_video"
+  | "extracting_transcript"
+  | "summarizing"
+  | "complete"
+  | "error"
+  | "canceled"
+  | "interrupted";
+
 export type BackgroundEvent =
-  | { type: "job/state"; requestId: string; tabId: number; state: string }
+  | { type: "job/state"; requestId: string; tabId: number; state: JobState }
   | { type: "job/progress"; requestId: string; tabId: number; completed: number; total: number }
-  | { type: "job/complete"; requestId: string; tabId: number; cacheKey: string }
-  | { type: "job/error"; requestId: string; tabId: number; code: string };
+  | { type: "job/error"; requestId: string; tabId: number; error: SafeAppError };
 
 export function parseAppMessage(value: unknown): AppMessage {
   return appMessageSchema.parse(value);
 }
 ~~~
 
-Create src/domain/errors.ts with the complete stable code union from the design, an AppError class containing code, retryable, safeMessage, retryAfterSeconds, and a toSafeError function that serializes only those safe fields. The cause remains a non-enumerable Error.cause and is never sent to the UI.
+Create src/domain/errors.ts with this complete stable union:
+
+~~~ts
+export type AppErrorCode =
+  | "unsupported_page"
+  | "video_context_unavailable"
+  | "captions_unavailable"
+  | "transcript_extraction_failed"
+  | "configuration_missing"
+  | "configuration_invalid"
+  | "custom_permission_denied"
+  | "credentials_rejected"
+  | "insufficient_credits"
+  | "provider_forbidden"
+  | "rate_limited"
+  | "provider_unavailable"
+  | "network_unavailable"
+  | "network_timeout"
+  | "context_limit_exceeded"
+  | "provider_output_invalid"
+  | "content_filtered"
+  | "request_canceled"
+  | "request_interrupted"
+  | "internal_error";
+
+export type RecoveryAction = "retry" | "settings" | "change_model" | "none";
+export type SafeAppError = {
+  code: AppErrorCode;
+  retryable: boolean;
+  safeMessage: string;
+  recoveryAction: RecoveryAction;
+  retryAfterSeconds?: number;
+};
+~~~
+
+The primary recovery mapping is: Retry for video_context_unavailable, transcript_extraction_failed, rate_limited, provider_unavailable, network_unavailable, network_timeout, request_interrupted, and internal_error; Settings for configuration_missing, configuration_invalid, custom_permission_denied, credentials_rejected, insufficient_credits, provider_forbidden, and context_limit_exceeded; Change model for provider_output_invalid; and None for unsupported_page, captions_unavailable, content_filtered, and request_canceled. provider_output_invalid may additionally expose Retry in the panel. AppError contains these safe fields; toSafeError serializes only SafeAppError. The cause remains a non-enumerable Error.cause and is never sent to the UI.
 
 Run: **pnpm vitest run tests/unit/messages.test.ts**
 
@@ -352,6 +394,7 @@ Expected: a clean commit containing only the foundation files.
 - Create: **src/youtube/normalizeTranscript.ts**
 - Create: **src/youtube/extractTranscript.ts**
 - Create: **entrypoints/youtube.content.ts**
+- Modify: **src/domain/messages.ts**
 - Create: **tests/fixtures/timed-text.xml**
 - Create: **tests/fixtures/visible-transcript.html**
 - Test: **tests/unit/video.test.ts**
@@ -360,7 +403,7 @@ Expected: a clean commit containing only the foundation files.
 
 **Interfaces:**
 - Produces: VideoContext, CaptionTrack, TranscriptSegment, Transcript, TranscriptPreference.
-- Produces: parseWatchUrl(url), readPlayerSnapshotInPage(), sanitizePlayerSnapshot(value), selectCaptionTrack(tracks, preference), parseTimedText(xml), normalizeTranscript(segments), and extractTranscript(snapshot, document, fetch).
+- Produces: parseWatchUrl(url), readPlayerSnapshotInPage(), sanitizePlayerSnapshot(value, testMode), selectCaptionTrack(tracks, preference), parseTimedText(xml), normalizeTranscript(segments), and the canonical extractTranscript(context, preference, dependencies, signal) coordinator.
 - Consumes: AppMessage from Task 1.
 
 - [ ] **Step 1: Write failing URL and caption-selection tests**
@@ -437,7 +480,16 @@ export function parseWatchUrl(value: string): Pick<VideoContext, "videoId" | "ca
 }
 ~~~
 
-Create captionSelection.ts with a stable score tuple implementing the six approved preference levels. Preserve original order as the final tie-breaker and compare language codes case-insensitively by primary language subtag.
+Create captionSelection.ts with this exact ascending priority order:
+
+1. human captions matching the configured preferred language;
+2. automatic captions matching the configured preferred language;
+3. human captions matching the browser language;
+4. automatic captions matching the browser language;
+5. any remaining human caption track;
+6. any remaining automatic caption track.
+
+When preferredLanguage is null, skip levels 1 and 2. Compare language codes case-insensitively by primary language subtag, so en-US matches en, and preserve the original track order as the final tie-breaker. Add one table-driven test for every level plus the null-preference and stable-tie cases.
 
 Run: **pnpm vitest run tests/unit/video.test.ts tests/unit/captionSelection.test.ts**
 
@@ -479,17 +531,17 @@ Expected: FAIL because the parser modules do not exist.
 
 - [ ] **Step 4: Implement timed-text, visible DOM, and normalization adapters**
 
-parseTimedText uses DOMParser, accepts only parsererror-free XML, reads text elements, converts finite nonnegative start/dur attributes, and returns TranscriptSegment values. visibleTranscript reads ytd-transcript-segment-renderer nodes, parses timestamp text as MM:SS or HH:MM:SS, and uses the next start time as duration when available. normalizeTranscript applies NFC normalization, collapses whitespace, removes empty segments, and removes only exact adjacent duplicate text whose time ranges overlap.
+parseTimedText uses DOMParser, accepts only parsererror-free XML, reads text elements, converts finite nonnegative start/dur attributes, and returns TranscriptSegment values. visibleTranscript reads ytd-transcript-segment-renderer nodes, parses timestamp text as MM:SS or HH:MM:SS, and uses the next start time as duration when available. normalizeTranscript applies NFC normalization, collapses whitespace, removes empty segments, and removes only exact adjacent duplicate text whose time ranges overlap or touch.
 
 Use this duplicate rule:
 
 ~~~ts
 const previousEnd = previous.startSeconds + previous.durationSeconds;
-const overlaps = segment.startSeconds <= previousEnd;
-if (overlaps && segment.text === previous.text) continue;
+const overlapsOrTouches = segment.startSeconds <= previousEnd;
+if (overlapsOrTouches && segment.text === previous.text) continue;
 ~~~
 
-Add a visible-transcript fixture with 00:00 and 00:04 segments and assert the same normalized content.
+Add a visible-transcript fixture with 00:00 and 00:04 segments and assert the same normalized content. Add explicit boundary tests proving identical text is removed when the next segment starts exactly at previousEnd but retained when it starts after previousEnd.
 
 Run: **pnpm vitest run tests/unit/transcript.test.ts**
 
@@ -497,7 +549,7 @@ Expected: PASS for timed-text, DOM fallback, malformed XML, empty segments, and 
 
 - [ ] **Step 5: Implement the sanitized player snapshot and ordered extraction**
 
-playerSnapshot.ts exports a self-contained readPlayerSnapshotInPage function that reads document.querySelector("#movie_player"), calls getPlayerResponse only when it is a function, and returns a plain object containing videoDetails plus captions.playerCaptionsTracklistRenderer.captionTracks. The background calls it with browser.scripting.executeScript using world MAIN and the active tab ID. sanitizePlayerSnapshot validates the returned unknown object in the trusted context and maps it into VideoContext. It receives a trusted build-time testMode boolean and accepts caption URLs only through this policy:
+playerSnapshot.ts exports a self-contained readPlayerSnapshotInPage function that reads document.querySelector("#movie_player"), calls getPlayerResponse only when it is a function, and returns a plain object containing videoDetails plus captions.playerCaptionsTracklistRenderer.captionTracks. The background calls it with browser.scripting.executeScript using world MAIN and the active tab ID. sanitizePlayerSnapshot validates the returned unknown object in the background trusted context and maps it into VideoContext. It receives a trusted build-time testMode boolean and accepts caption URLs only through this policy:
 
 ~~~ts
 export function isAllowedCaptionUrl(url: URL, testMode: boolean): boolean {
@@ -524,11 +576,13 @@ export async function extractTranscript(
 ): Promise<Transcript>;
 ~~~
 
-It selects and fetches timed text first. If snapshot tracks are empty or parsing yields no segments, it uses normalized visible segments. If both fail, throw an AppError with code captions_unavailable or transcript_extraction_failed.
+This pure coordinator runs in youtube.content.ts, where DOMParser and the page's same-origin caption fetch are available. It selects a track and fetches timed text first through the injected fetchText adapter, then parses and normalizes it. If snapshot tracks are empty or parsing yields no segments, readVisibleSegments reads the isolated-world DOM fallback. If both sources are empty, throw captions_unavailable; if a source exists but fetch, parsing, or bridge behavior fails, throw transcript_extraction_failed.
+
+After defining the video schemas, extend messages.ts with youtube/extract carrying a validated VideoContext and TranscriptPreference and youtube/cancel-extract carrying the same request identity. The background obtains and sanitizes the main-world snapshot, sends youtube/extract to the content script, and validates the returned Transcript response. youtube.content.ts keeps one AbortController per requestId; youtube/cancel-extract aborts the caption fetch and removes the request. This makes runtime cancellation explicit without trying to serialize AbortSignal.
 
 - [ ] **Step 6: Wire content-script messages and YouTube SPA navigation**
 
-youtube.content.ts matches https://www.youtube.com/*, validates every incoming message with parseAppMessage, handles context/extract/seek, and listens for yt-navigate-finish. Seek uses the HTMLVideoElement currentTime and play state without forcing playback. The navigation event sends the newly parsed video ID or null to the background.
+youtube.content.ts matches https://www.youtube.com/*, validates every incoming message with parseAppMessage, handles youtube/extract, youtube/cancel-extract, and youtube/seek, and listens for yt-navigate-finish. Extraction responses are validated plain Transcript values or SafeAppError values. Seek uses the HTMLVideoElement currentTime and play state without forcing playback. The navigation event sends the newly parsed video ID or null to the background. Main-world snapshot access and sanitization remain in the background; caption selection, same-origin timed-text fetch/parsing, visible DOM fallback, and extractTranscript orchestration run in the content script.
 
 Run: **pnpm typecheck && pnpm vitest run tests/unit/video.test.ts tests/unit/captionSelection.test.ts tests/unit/transcript.test.ts**
 
@@ -539,7 +593,7 @@ Expected: all commands PASS.
 Run:
 
 ~~~bash
-git add entrypoints/youtube.content.ts src/domain/video.ts src/youtube tests/fixtures tests/unit
+git add entrypoints/youtube.content.ts src/domain/messages.ts src/domain/video.ts src/youtube tests/fixtures tests/unit
 git commit -m "feat: extract YouTube captions"
 ~~~
 
@@ -698,6 +752,7 @@ Expected: commit contains no real API key and no .env file.
 - Create: **src/providers/openaiCompatible.ts**
 - Create: **src/providers/factory.ts**
 - Create: **src/summarization/prompts.ts**
+- Modify: **src/domain/messages.ts**
 - Modify: **entrypoints/options/App.tsx**
 - Create: **tests/fixtures/openai-responses.sse**
 - Create: **tests/fixtures/openrouter-chat.sse**
@@ -706,7 +761,7 @@ Expected: commit contains no real API key and no .env file.
 - Test: **tests/unit/providers.test.ts**
 
 **Interfaces:**
-- Produces: VideoSummary, ChunkSummary, ProviderClient, ProviderRequest, ProviderEvent, createProvider(config, fetch), and buildSummaryPrompt(input).
+- Produces: VideoSummary, ChunkSummary, CompletedSummaryPayload, ProviderClient, ProviderRequest, ProviderEvent, createProvider(config, fetch), and buildSummaryPrompt(input).
 - Consumes: ProviderConfig and VideoContext.
 
 - [ ] **Step 1: Write failing summary-schema tests**
@@ -743,6 +798,19 @@ Expected: FAIL because summary.ts does not exist.
 - [ ] **Step 2: Define summary, chunk, error, and provider contracts**
 
 summaryContentSchema requires 1 to 4 overview paragraphs, 1 to 12 takeaways, 1 to 30 sections, finite nonnegative timestamps, and plain strings no longer than explicit schema limits. videoSummarySchema extends that content with schemaVersion 1, the fixed caption limitation, and an ISO generatedAt timestamp attached by the pipeline after provider validation. The model never invents the generation time. Strings remain untrusted text; angle brackets are allowed as text because React escapes them, while the schema rejects control characters.
+
+Define and validate the complete UI delivery payload in summary.ts:
+
+~~~ts
+export type CompletedSummaryPayload = {
+  video: { videoId: string; title: string; channel: string | null };
+  caption: { languageCode: string; label: string; isAutoGenerated: boolean };
+  summary: VideoSummary;
+  cache: { key: string; createdAt: string } | null;
+};
+~~~
+
+completedSummaryPayloadSchema composes videoSummarySchema and validates every metadata field. After this schema exists, extend BackgroundEvent in messages.ts with `{ type: "job/complete"; requestId; tabId; result: CompletedSummaryPayload }`. Task 5 emits the full validated result and returns the same object from panel/status; the panel never looks up a result by cache key. Before Task 7, cache is always null. On a Task 7 cache hit it identifies the validated cache entry and its creation date.
 
 Provider contracts:
 
@@ -818,7 +886,7 @@ Expected: PASS.
 Run:
 
 ~~~bash
-git add src/domain/summary.ts src/providers src/summarization/prompts.ts entrypoints/options/App.tsx tests/fixtures tests/unit tests/components
+git add src/domain/messages.ts src/domain/summary.ts src/providers src/summarization/prompts.ts entrypoints/options/App.tsx tests/fixtures tests/unit tests/components
 git commit -m "feat: add LLM provider adapters"
 ~~~
 
@@ -840,7 +908,7 @@ Expected: provider adapters are independently tested with mocked fetch and fixtu
 - Test: **tests/components/sidepanel.test.tsx**
 
 **Interfaces:**
-- Produces: JobState, JobSnapshot, JobRegistry, SummaryController.start(), cancel(), status(), and runSummaryPipeline().
+- Produces: JobSnapshot, JobRegistry, SummaryController.start(), cancel(), status(), and runSummaryPipeline(); reuses JobState from the runtime contract.
 - Consumes: transcript extraction messages, storage, provider factory, settings, and summary schemas.
 
 - [ ] **Step 1: Write failing stale-job and cancellation tests**
@@ -853,7 +921,7 @@ Expected: FAIL before jobRegistry.ts exists.
 
 - [ ] **Step 2: Implement one job per tab**
 
-JobState values are loading_video, extracting_transcript, summarizing, complete, error, canceled, and interrupted. Each record holds requestId, tabId, videoId, AbortController, state, progress, and startedAt. complete and fail require matching requestId and videoId.
+Reuse the JobState union created in Task 1. Each record holds requestId, tabId, videoId, AbortController, state, progress, startedAt, and a completed result only in the complete state. Define JobSnapshot as a discriminated union: non-complete states never contain result, while `{ state: "complete" }` requires a CompletedSummaryPayload result. complete and fail require matching requestId and videoId. status(tabId) returns the serializable JobSnapshot; it never exposes AbortController.
 
 Run: **pnpm vitest run tests/unit/jobRegistry.test.ts**
 
@@ -865,18 +933,18 @@ runSummaryPipeline accepts normalized transcript, video metadata, settings, prov
 
 The controller sequence is:
 
-1. Validate the active tab URL through a content-script context request.
+1. Validate the active tab URL, execute readPlayerSnapshotInPage in MAIN world, and sanitize the returned VideoContext in the background.
 2. Load and validate settings.
 3. Begin a registry job and emit loading_video.
-4. Request extraction and emit extracting_transcript.
+4. Send the validated context and preference in youtube/extract to the content script and emit extracting_transcript; cancellation also sends youtube/cancel-extract.
 5. Create the provider and emit summarizing.
 6. Run the pipeline.
 7. Recheck registry currentness before returning or storing any result.
-8. Emit complete or a mapped error.
+8. Construct and validate CompletedSummaryPayload, store it on the current JobSnapshot, and emit job/complete with that same result; otherwise emit a mapped safe error.
 
 - [ ] **Step 4: Write the controller test with fakes**
 
-Assert unsupported pages and missing settings make zero provider calls; caption failures make zero provider calls; cancellation aborts fetch; and a late job A result cannot overwrite job B.
+Assert unsupported pages and missing settings make zero provider calls; caption failures make zero provider calls; cancellation aborts the content-script fetch; and a late job A result cannot overwrite job B. Assert controller.status(tabId).result deep-equals the job/complete event result and invalid completion payloads are rejected before either path exposes them.
 
 Run: **pnpm vitest run tests/unit/controller.test.ts**
 
@@ -884,7 +952,7 @@ Expected: PASS after controller implementation.
 
 - [ ] **Step 5: Route background messages and events**
 
-background.ts validates sender.tab for content-script navigation, validates AppMessage payloads, calls controller methods, and returns serializable snapshots. Side-panel events use browser.runtime.connect with a named port "summary-panel"; disconnecting removes the listener but does not cancel the job.
+background.ts validates sender.tab for content-script navigation, validates AppMessage payloads, calls controller methods, and returns serializable snapshots. A panel/status response contains the current JobSnapshot, including the validated CompletedSummaryPayload when complete. Side-panel events use browser.runtime.connect with a named port "summary-panel"; job/complete contains the identical payload. Disconnecting removes the listener but does not cancel the job.
 
 - [ ] **Step 6: Build the side-panel state machine and safe renderer**
 
@@ -1071,7 +1139,7 @@ background.ts accepts youtube/navigated only from a sender whose tab ID matches 
 
 Map every design error code to title, message, retryability, and action. Panel controls are:
 
-- Retry for transient network, timeout, rate-limit, unavailable, interruption, and extraction errors.
+- Retry for unavailable video context, transient network, timeout, rate-limit, unavailable provider, lifecycle interruption, internal error, and extraction errors.
 - Settings for missing configuration, credential, credit, forbidden, context-limit, or custom-permission errors.
 - No retry for unsupported page, no captions, canceled, or content-filtered results.
 
@@ -1143,7 +1211,7 @@ export default defineContentScript({
 
 WXT imports entrypoints at build time to generate content-script manifest entries and exposes WXT_-prefixed environment variables through import.meta.env. The fixture page implements #movie_player.getPlayerResponse(), a video element, title/channel metadata, and a caption base URL served by the mock server. Its loopback caption URL is accepted only by the build-time-gated isAllowedCaptionUrl policy from Task 2. Production builds contain neither the localhost match nor test bridge allowance.
 
-Add a manifest test that runs the production build and immediately asserts no loopback content match, host permission, or test bridge is present; then run the test build and immediately assert the 127.0.0.1 content match and bridge are present. Add a packaged extraction assertion proving the loopback fixture transcript succeeds in test mode. The production sanitizer unit test remains the regression gate that the same URL is rejected when testMode is false.
+Add a manifest test that runs the production build and immediately asserts no loopback content-script match, fixed host_permissions entry, or test bridge is present; the intentional optional_host_permissions entries for localhost and 127.0.0.1 must remain. Then run the test build and immediately assert the 127.0.0.1 content match, fixed test host permission, and bridge are present. Add a packaged extraction assertion proving the loopback fixture transcript succeeds in test mode. The production sanitizer unit test remains the regression gate that the same URL is rejected when testMode is false.
 
 - [ ] **Step 3: Test the packaged uncached, cached, cancellation, and permission flows**
 
@@ -1175,6 +1243,7 @@ docs/privacy.md states:
 - that transcript text is sent only to the selected provider;
 - that keys are local but browser storage is not a vault;
 - why each fixed and optional permission exists;
+- that declaring optional https://*/* is required to support a user-chosen HTTPS custom provider, but runtime code requests only the single validated scheme-and-host pattern returned by customOriginPattern and never requests blanket all-site access;
 - how to clear keys and summaries;
 - that the MVP has no application telemetry or backend.
 
