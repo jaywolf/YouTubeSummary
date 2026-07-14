@@ -162,6 +162,19 @@ describe("parseTranscriptResponse", () => {
     expect(Object.keys(ERROR_PRESENTATIONS).sort()).toEqual([...APP_ERROR_CODES].sort());
   });
 
+  it("uses transcript-oriented extraction error wording", () => {
+    expect(ERROR_PRESENTATIONS.captions_unavailable).toEqual({
+      title: "No transcript available",
+      message: "YouTube does not provide captions or a transcript for this video.",
+      actions: []
+    });
+    expect(ERROR_PRESENTATIONS.transcript_extraction_failed).toEqual({
+      title: "Transcript could not be read",
+      message: "The extension could not open or read YouTube's transcript. Reload the video and retry.",
+      actions: ["retry"]
+    });
+  });
+
   it("rejects an error code outside the shared tuple", () => {
     expect(() => parseTranscriptResponse({
       code: "not_an_application_error",

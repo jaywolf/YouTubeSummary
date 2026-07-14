@@ -21,12 +21,59 @@ export function readPlayerSnapshotInPage(): unknown {
     const player = document.querySelector("#movie_player") as Element & {
       getPlayerResponse?: unknown;
     } | null;
-    if (player === null || typeof player.getPlayerResponse !== "function") return null;
+    const candidates: unknown[] = [];
+    if (player !== null && typeof player.getPlayerResponse === "function") {
+      try {
+        candidates.push((player.getPlayerResponse as () => unknown)());
+      } catch {
+        // Fall through to YouTube's serialized initial response.
+      }
+    }
+    const globals = window as typeof window & {
+      ytInitialPlayerResponse?: unknown;
+      ytplayer?: { config?: { args?: {
+        player_response?: unknown;
+        raw_player_response?: unknown;
+      } } };
+    };
+    candidates.push(globals.ytInitialPlayerResponse);
+    const configuredResponse = globals.ytplayer?.config?.args?.player_response;
+    if (typeof configuredResponse === "string") {
+      try {
+        candidates.push(JSON.parse(configuredResponse));
+      } catch {
+        // Ignore malformed page-owned data.
+      }
+    } else {
+      candidates.push(configuredResponse);
+    }
+    candidates.push(globals.ytplayer?.config?.args?.raw_player_response);
 
-    const response = (player.getPlayerResponse as () => unknown)();
-    if (typeof response !== "object" || response === null) return null;
+    const currentUrl = new URL(location.href);
+    const currentVideoId = currentUrl.pathname === "/watch"
+      ? currentUrl.searchParams.get("v")
+      : null;
+    if (currentVideoId === null || !/^[A-Za-z0-9_-]{11}$/.test(currentVideoId)) return null;
 
-    const value = response as Record<string, unknown>;
+    const records = candidates.filter((candidate): candidate is Record<string, unknown> => {
+      if (typeof candidate !== "object" || candidate === null) return false;
+      const details = (candidate as Record<string, unknown>).videoDetails;
+      if (typeof details !== "object" || details === null) return false;
+      const videoId = (details as Record<string, unknown>).videoId;
+      return videoId === currentVideoId;
+    });
+
+    const value = records.find((candidate) => {
+      const details = candidate.videoDetails as Record<string, unknown>;
+      if (typeof details.title !== "string") return false;
+      if (details.author !== undefined && typeof details.author !== "string") return false;
+      if (details.lengthSeconds === undefined) return true;
+      if (typeof details.lengthSeconds !== "string"
+          && typeof details.lengthSeconds !== "number") return false;
+      const duration = Number(details.lengthSeconds);
+      return Number.isFinite(duration) && duration >= 0;
+    });
+    if (value === undefined) return null;
     const rawDetails = typeof value.videoDetails === "object" && value.videoDetails !== null
       ? value.videoDetails as Record<string, unknown>
       : {};
@@ -37,8 +84,31 @@ export function readPlayerSnapshotInPage(): unknown {
       }
     }
 
-    const rawCaptions = typeof value.captions === "object" && value.captions !== null
-      ? value.captions as Record<string, unknown>
+    const captionSource = records.find((candidate) => {
+      const captions = candidate.captions;
+      if (typeof captions !== "object" || captions === null) return false;
+      const renderer = (captions as Record<string, unknown>).playerCaptionsTracklistRenderer;
+      if (typeof renderer !== "object" || renderer === null) return false;
+      const tracks = (renderer as Record<string, unknown>).captionTracks;
+      if (!Array.isArray(tracks)) return false;
+      return tracks.some((track) => {
+        if (typeof track !== "object" || track === null) return false;
+        const source = track as Record<string, unknown>;
+        if (typeof source.baseUrl !== "string" || source.baseUrl === ""
+            || typeof source.languageCode !== "string" || source.languageCode === "") {
+          return false;
+        }
+        try {
+          new URL(source.baseUrl);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    }) ?? value;
+    const rawCaptions = typeof captionSource.captions === "object"
+      && captionSource.captions !== null
+      ? captionSource.captions as Record<string, unknown>
       : {};
     const rawRenderer = typeof rawCaptions.playerCaptionsTracklistRenderer === "object" &&
       rawCaptions.playerCaptionsTracklistRenderer !== null

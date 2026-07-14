@@ -11,9 +11,19 @@ describe("YouTube content-script entrypoint", () => {
     vi.unstubAllGlobals();
     vi.resetModules();
     document.body.replaceChildren();
+    history.replaceState({}, "", "/");
   });
 
   it("registers the synchronous sendResponse adapter instead of returning a Promise", async () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    document.body.innerHTML = `<ytd-engagement-panel-section-list-renderer
+      target-id="engagement-panel-searchable-transcript"
+      visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED">
+      <ytd-transcript-segment-renderer>
+        <span id="segment-timestamp">0:00</span>
+        <span id="segment-text">Visible fixture transcript</span>
+      </ytd-transcript-segment-renderer>
+    </ytd-engagement-panel-section-list-renderer>`;
     let registeredListener: RuntimeListener | undefined;
     vi.stubGlobal("defineContentScript", (config: unknown) => config);
     vi.stubGlobal("browser", {
@@ -52,7 +62,7 @@ describe("YouTube content-script entrypoint", () => {
     expect(returned).not.toBeInstanceOf(Promise);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledOnce());
     expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
-      code: "captions_unavailable"
+      segments: [expect.objectContaining({ text: "Visible fixture transcript" })]
     }));
   });
 

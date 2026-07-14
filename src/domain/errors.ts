@@ -54,13 +54,13 @@ export const ERROR_PRESENTATIONS = {
     actions: ["retry"]
   },
   captions_unavailable: {
-    title: "Captions unavailable",
-    message: "This video does not have captions that can be summarized.",
+    title: "No transcript available",
+    message: "YouTube does not provide captions or a transcript for this video.",
     actions: []
   },
   transcript_extraction_failed: {
-    title: "Transcript unavailable",
-    message: "YouTube captions could not be extracted. Try again after reloading the video.",
+    title: "Transcript could not be read",
+    message: "The extension could not open or read YouTube's transcript. Reload the video and retry.",
     actions: ["retry"]
   },
   configuration_missing: {

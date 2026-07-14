@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppMessage } from "../../src/domain/messages";
 import type { Transcript, VideoContext } from "../../src/domain/video";
 import {
+  createBrowserTranscriptDependencies,
   createChromeMessageListener,
   createYouTubeMessageHandler,
   sendYouTubeNavigation
@@ -36,6 +37,40 @@ const transcript: Transcript = {
 };
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("browser transcript requests", () => {
+  it("requests YouTube's structured JSON3 timed-text format", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{"events":[]}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createBrowserTranscriptDependencies().fetchText(
+      "https://www.youtube.com/api/timedtext?v=abcdefghijk&lang=en",
+      new AbortController().signal
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://www.youtube.com/api/timedtext?v=abcdefghijk&lang=en&fmt=json3",
+      expect.objectContaining({ credentials: "same-origin" })
+    );
+  });
+
+  it("replaces an existing caption format without dropping signed query parameters", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{"events":[]}'));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+
+    await createBrowserTranscriptDependencies().fetchText(
+      "https://www.youtube.com/api/timedtext?v=abcdefghijk&fmt=srv3&sig=synthetic",
+      signal
+    );
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    const parsed = new URL(String(url));
+    expect(parsed.searchParams.getAll("fmt")).toEqual(["json3"]);
+    expect(parsed.searchParams.get("sig")).toBe("synthetic");
+    expect(init).toEqual(expect.objectContaining({ signal, credentials: "same-origin" }));
+  });
+});
 
 describe("YouTube content runtime messages", () => {
   it("validates extraction input and returns a validated plain transcript", async () => {

@@ -86,11 +86,20 @@ export async function startMockServer(): Promise<MockServer> {
     }
     if (request.method === "GET" && url.pathname === "/captions") {
       const id = url.searchParams.get("v") ?? "aaaaaaaaaaa";
-      response.writeHead(200, { "Content-Type": "application/xml" });
-      response.end(`<?xml version="1.0"?><transcript>
-        <text start="0" dur="15">Synthetic transcript for ${id}.</text>
-        <text start="42" dur="20">Packaged extension timestamp checkpoint.</text>
-      </transcript>`);
+      sendJson(response, {
+        events: [
+          {
+            tStartMs: 0,
+            dDurationMs: 15_000,
+            segs: [{ utf8: `Synthetic transcript for ${id}.` }]
+          },
+          {
+            tStartMs: 42_000,
+            dDurationMs: 20_000,
+            segs: [{ utf8: "Packaged extension timestamp checkpoint." }]
+          }
+        ]
+      });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/chat/completions") {

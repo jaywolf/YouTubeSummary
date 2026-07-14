@@ -162,7 +162,7 @@ function copyText(result: CompletedSummaryPayload): string {
 
 function phaseLabel(state: JobState, progress: PipelineProgress | null): string {
   if (state === "loading_video") return "Reading the current video";
-  if (state === "extracting_transcript") return "Extracting YouTube captions";
+  if (state === "extracting_transcript") return "Reading YouTube transcript";
   if (progress?.phase === "mapping") return "Summarizing caption chunks";
   if (progress?.phase === "reducing") return "Combining chunk summaries";
   return "Creating final summary";

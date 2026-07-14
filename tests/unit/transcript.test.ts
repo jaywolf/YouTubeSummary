@@ -3,7 +3,27 @@ import { describe, expect, it } from "vitest";
 import type { TranscriptSegment } from "../../src/domain/video";
 import { normalizeTranscript } from "../../src/youtube/normalizeTranscript";
 import { parseTimedText } from "../../src/youtube/timedText";
-import { readVisibleTranscript } from "../../src/youtube/visibleTranscript";
+import {
+  markTranscriptNavigationStart,
+  readTranscriptFromPage,
+  readVisibleTranscript
+} from "../../src/youtube/visibleTranscript";
+
+const TRANSCRIPT_PANEL_TEST_SELECTOR =
+  "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript']";
+
+function transcriptPanel(rows: string, attributes = "visibility='ENGAGEMENT_PANEL_VISIBILITY_EXPANDED'"): string {
+  return `<ytd-engagement-panel-section-list-renderer
+    target-id="engagement-panel-searchable-transcript" ${attributes}>${rows}
+  </ytd-engagement-panel-section-list-renderer>`;
+}
+
+function transcriptRow(timestamp: string, text: string): string {
+  return `<ytd-transcript-segment-renderer>
+    <span id="segment-timestamp">${timestamp}</span>
+    <span id="segment-text">${text}</span>
+  </ytd-transcript-segment-renderer>`;
+}
 
 describe("timed-text parsing and normalization", () => {
   it("parses entities and removes exact adjacent overlap duplicates", () => {
@@ -32,6 +52,36 @@ describe("timed-text parsing and normalization", () => {
 
     expect(parseTimedText(xml)).toEqual([
       { startSeconds: 2, durationSeconds: 0, text: "instant" }
+    ]);
+  });
+
+  it("parses YouTube JSON3 timed text", () => {
+    const json3 = JSON.stringify({
+      events: [
+        { tStartMs: 0, dDurationMs: 2_000, segs: [{ utf8: "Hello" }, { utf8: " world" }] },
+        { tStartMs: 2_000, dDurationMs: 1_500, segs: [{ utf8: "Second point" }] },
+        { tStartMs: 3_500, dDurationMs: 500 }
+      ]
+    });
+
+    expect(parseTimedText(json3)).toEqual([
+      { startSeconds: 0, durationSeconds: 2, text: "Hello world" },
+      { startSeconds: 2, durationSeconds: 1.5, text: "Second point" }
+    ]);
+  });
+
+  it("ignores malformed JSON3 events while retaining valid zero-duration text", () => {
+    const json3 = JSON.stringify({
+      events: [
+        { tStartMs: -1, dDurationMs: 1_000, segs: [{ utf8: "negative" }] },
+        { tStartMs: 0, dDurationMs: -1, segs: [{ utf8: "bad duration" }] },
+        { tStartMs: 1_000, segs: [{ utf8: "Valid" }, { bad: true }] },
+        { tStartMs: 2_000, dDurationMs: 1_000, segs: "not-an-array" }
+      ]
+    });
+
+    expect(parseTimedText(json3)).toEqual([
+      { startSeconds: 1, durationSeconds: 0, text: "Valid" }
     ]);
   });
 
@@ -104,5 +154,283 @@ describe("visible transcript parsing", () => {
     expect(readVisibleTranscript(document)).toEqual([
       { startSeconds: 3_723, durationSeconds: 0, text: "Long video" }
     ]);
+  });
+
+  it("opens YouTube's transcript section when segments are not rendered yet", async () => {
+    document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
+      <button type="button">Show transcript</button>
+    </ytd-video-description-transcript-section-renderer>`;
+    document.querySelector("button")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+        transcriptRow("0:00", "Automatically revealed")
+      ));
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal
+    )).resolves.toEqual([
+      { startSeconds: 0, durationSeconds: 0, text: "Automatically revealed" }
+    ]);
+  });
+
+  it("expands the description before opening a lazily rendered transcript control", async () => {
+    document.body.innerHTML = `<ytd-watch-metadata><div id="description">
+      <button id="expand" type="button">More</button>
+    </div></ytd-watch-metadata>`;
+    document.querySelector("#expand")?.addEventListener("click", () => {
+      document.querySelector("#description")?.insertAdjacentHTML("beforeend", `
+        <ytd-video-description-transcript-section-renderer>
+          <button class="show-transcript" type="button">Show transcript</button>
+        </ytd-video-description-transcript-section-renderer>`);
+      document.querySelector(".show-transcript")?.addEventListener("click", () => {
+        document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+          transcriptRow("0:01", "Expanded automatically")
+        ));
+      });
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal
+    )).resolves.toEqual([
+      { startSeconds: 1, durationSeconds: 0, text: "Expanded automatically" }
+    ]);
+  });
+
+  it("waits for incrementally rendered transcript rows to settle", async () => {
+    document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
+      <button type="button">Show transcript</button>
+    </ytd-video-description-transcript-section-renderer>`;
+    document.querySelector("button")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+        transcriptRow("0:00", "First") + transcriptRow("0:02", "Second")
+      ));
+    });
+
+    const rendered = await readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { transcriptMs: 200, quietMs: 20 }
+    );
+    expect(document.querySelectorAll("ytd-transcript-segment-renderer")).toHaveLength(2);
+    expect(rendered).toEqual([
+      { startSeconds: 0, durationSeconds: 2, text: "First" },
+      { startSeconds: 2, durationSeconds: 0, text: "Second" }
+    ]);
+  });
+
+  it("aborts while waiting for a revealed transcript", async () => {
+    document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
+      <button type="button">Show transcript</button>
+    </ytd-video-description-transcript-section-renderer>`;
+    const controller = new AbortController();
+    const pending = readTranscriptFromPage(
+      document,
+      null,
+      controller.signal,
+      { transcriptMs: 200, quietMs: 20 }
+    );
+    controller.abort(new DOMException("Canceled", "AbortError"));
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("discovers a transcript control that YouTube renders shortly afterward", async () => {
+    document.body.replaceChildren();
+    setTimeout(() => {
+      document.body.insertAdjacentHTML("beforeend", `<ytd-video-description-transcript-section-renderer>
+        <button type="button">Show transcript</button>
+      </ytd-video-description-transcript-section-renderer>`);
+      document.querySelector("button")?.addEventListener("click", () => {
+        document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+          transcriptRow("0:03", "Delayed control")
+        ));
+      });
+    }, 10);
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { discoveryMs: 100, transcriptMs: 100, quietMs: 10 }
+    )).resolves.toEqual([
+      { startSeconds: 3, durationSeconds: 0, text: "Delayed control" }
+    ]);
+  });
+
+  it("detects a transcript control revealed only by an attribute change", async () => {
+    document.body.innerHTML = `<ytd-watch-metadata><div id="description">
+      <button id="expand" type="button">More</button>
+      <ytd-video-description-transcript-section-renderer hidden>
+        <button class="show-transcript" type="button">Show transcript</button>
+      </ytd-video-description-transcript-section-renderer>
+    </div></ytd-watch-metadata>`;
+    document.querySelector("#expand")?.addEventListener("click", () => {
+      document.querySelector("ytd-video-description-transcript-section-renderer")
+        ?.removeAttribute("hidden");
+    });
+    document.querySelector(".show-transcript")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+        transcriptRow("0:04", "Attribute reveal")
+      ));
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { discoveryMs: 100, transcriptMs: 100, quietMs: 10 }
+    )).resolves.toEqual([
+      { startSeconds: 4, durationSeconds: 0, text: "Attribute reveal" }
+    ]);
+  });
+
+  it("ignores hidden transcript panels and reads the newly opened active panel", async () => {
+    document.body.innerHTML = transcriptPanel(
+      transcriptRow("0:00", "Old hidden transcript"),
+      "visibility='ENGAGEMENT_PANEL_VISIBILITY_HIDDEN'"
+    ) + `<ytd-video-description-transcript-section-renderer>
+      <button type="button">Show transcript</button>
+    </ytd-video-description-transcript-section-renderer>`;
+    document.querySelector("button")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+        transcriptRow("0:02", "Current visible transcript")
+      ));
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { transcriptMs: 100, quietMs: 10 }
+    )).resolves.toEqual([
+      { startSeconds: 2, durationSeconds: 0, text: "Current visible transcript" }
+    ]);
+  });
+
+  it("does not let unrelated page churn reset transcript settling", async () => {
+    document.body.innerHTML = `<div id="unrelated"></div>
+      <ytd-video-description-transcript-section-renderer>
+        <button type="button">Show transcript</button>
+      </ytd-video-description-transcript-section-renderer>`;
+    document.querySelector("button")?.addEventListener("click", () => {
+      document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+        transcriptRow("0:00", "Stable transcript")
+      ));
+      for (let index = 0; index < 6; index += 1) {
+        setTimeout(() => {
+          const churn = document.createElement("span");
+          churn.textContent = String(index);
+          document.querySelector("#unrelated")?.append(churn);
+        }, index * 5);
+      }
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { transcriptMs: 100, quietMs: 20 }
+    )).resolves.toEqual([
+      { startSeconds: 0, durationSeconds: 0, text: "Stable transcript" }
+    ]);
+  });
+
+  it("returns the latest usable rows when they arrive just before the deadline", async () => {
+    document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
+      <button type="button">Show transcript</button>
+    </ytd-video-description-transcript-section-renderer>`;
+    document.querySelector("button")?.addEventListener("click", () => {
+      setTimeout(() => {
+        document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+          transcriptRow("0:05", "Late but usable")
+        ));
+      }, 30);
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { transcriptMs: 40, quietMs: 30 }
+    )).resolves.toEqual([
+      { startSeconds: 5, durationSeconds: 0, text: "Late but usable" }
+    ]);
+  });
+
+  it("aborts when navigation leaves the expected watch page", async () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    document.body.innerHTML = `<ytd-watch-flexy video-id="abcdefghijk">
+      <ytd-video-description-transcript-section-renderer>
+        <button type="button">Show transcript</button>
+      </ytd-video-description-transcript-section-renderer>
+    </ytd-watch-flexy>`;
+    const pending = readTranscriptFromPage(
+      document,
+      "abcdefghijk",
+      new AbortController().signal,
+      { transcriptMs: 100, quietMs: 10 }
+    );
+    history.replaceState({}, "", "/feed/subscriptions");
+    document.body.append(document.createElement("span"));
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("refreshes stale transcript rows captured before an SPA navigation", async () => {
+    history.replaceState({}, "", "/watch?v=aaaaaaaaaaa");
+    document.body.innerHTML = `<ytd-watch-flexy video-id="aaaaaaaaaaa">
+      ${transcriptPanel(transcriptRow("0:00", "Video A transcript"))}
+      <ytd-video-description-transcript-section-renderer>
+        <button type="button">Show transcript</button>
+      </ytd-video-description-transcript-section-renderer>
+    </ytd-watch-flexy>`;
+    markTranscriptNavigationStart(document);
+    history.replaceState({}, "", "/watch?v=bbbbbbbbbbb");
+    document.querySelector("ytd-watch-flexy")?.setAttribute("video-id", "bbbbbbbbbbb");
+    document.querySelector("button")?.addEventListener("click", () => {
+      const panel = document.querySelector(TRANSCRIPT_PANEL_TEST_SELECTOR);
+      if (panel !== null) panel.innerHTML = transcriptRow("0:07", "Video B transcript");
+    });
+
+    await expect(readTranscriptFromPage(
+      document,
+      "bbbbbbbbbbb",
+      new AbortController().signal,
+      { transcriptMs: 100, quietMs: 10 }
+    )).resolves.toEqual([
+      { startSeconds: 7, durationSeconds: 0, text: "Video B transcript" }
+    ]);
+  });
+
+  it("does not steal focus when the user focuses another control during extraction", async () => {
+    document.body.innerHTML = `<button id="original">Original</button>
+      <button id="user-choice">User choice</button>
+      <ytd-video-description-transcript-section-renderer>
+        <button id="transcript-trigger" type="button">Show transcript</button>
+      </ytd-video-description-transcript-section-renderer>`;
+    const original = document.querySelector<HTMLElement>("#original")!;
+    const userChoice = document.querySelector<HTMLElement>("#user-choice")!;
+    original.focus();
+    document.querySelector("#transcript-trigger")?.addEventListener("click", () => {
+      setTimeout(() => userChoice.focus(), 5);
+      setTimeout(() => {
+        document.body.insertAdjacentHTML("beforeend", transcriptPanel(
+          transcriptRow("0:01", "Focus-safe transcript")
+        ));
+      }, 10);
+    });
+
+    await readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { transcriptMs: 100, quietMs: 10 }
+    );
+    expect(document.activeElement).toBe(userChoice);
   });
 });

@@ -41,7 +41,7 @@ While work is active, `chrome.storage.session` contains a versioned list with at
 
 ## Data that is transient
 
-Normalized transcript segments, request prompts, partial provider streams, and in-progress intermediate summaries exist only in memory for the active job. Raw transcripts are not written to extension local or session storage. The extension also does not persist authorization headers, full provider error bodies, page DOM snapshots, or raw model output.
+Normalized transcript segments, request prompts, partial provider streams, and in-progress intermediate summaries exist only in memory for the active job. Raw transcripts are not written to extension local or session storage. When direct timed text is unavailable, the extension may locally open YouTube's transcript panel and read its rendered rows; this does not add another network destination or stored data category. The extension also does not persist authorization headers, full provider error bodies, page DOM snapshots, or raw model output.
 
 Closing the side panel does not intentionally cancel active work. Browser service-worker suspension can interrupt it; a stored job identity may remain briefly so the panel can report that interruption, but the transcript is not restored from storage.
 
@@ -55,7 +55,7 @@ Summary requests send only to the provider selected in Settings:
 - the selected exact provider model ID;
 - system instructions and the required structured-output schema;
 - video title, channel name when available, and video ID;
-- caption text with segment start times and durations, either in one request or sequential chunks; and
+- caption/transcript text with segment start times and durations, either in one request or sequential chunks; and
 - the output-language instruction and selected summary-detail instruction.
 
 For a long video, later requests may send validated intermediate chunk summaries instead of the original transcript chunks. If a provider returns malformed structured output, one repair request may send that provider's invalid output back to the same selected provider. **Test connection** sends only a small synthetic prompt and schema; it does not send video metadata or a transcript.

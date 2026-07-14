@@ -75,7 +75,7 @@ export async function configureProvider(
   }));
   await options.getByRole("combobox", { name: "Provider" }).selectOption("custom");
   await options.getByLabel("Base URL").fill(server.providerBaseUrl);
-  await options.getByLabel("Model ID").fill("synthetic-model");
+  await options.getByLabel("Model name or ID").fill("synthetic-model");
   await options.getByLabel("API key").fill("synthetic-key");
   await options.locator("label.disclosure input[type=checkbox]").check();
   await options.getByRole("button", { name: "Save settings" }).click();

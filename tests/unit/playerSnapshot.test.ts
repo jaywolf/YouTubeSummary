@@ -97,9 +97,13 @@ describe("player snapshot sanitization", () => {
 describe("MAIN-world player reader", () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    delete (window as typeof window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse;
+    delete (window as typeof window & { ytplayer?: unknown }).ytplayer;
+    history.replaceState({}, "", "/");
   });
 
   it("returns only video details and caption tracks", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
     const player = document.createElement("div") as HTMLDivElement & {
       getPlayerResponse: () => unknown;
     };
@@ -132,6 +136,156 @@ describe("MAIN-world player reader", () => {
     document.body.append(player);
 
     expect(readPlayerSnapshotInPage()).toBeNull();
+  });
+
+  it("uses a matching initial player response when the player omits caption tracks", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    const player = document.createElement("div") as HTMLDivElement & {
+      getPlayerResponse: () => unknown;
+    };
+    player.id = "movie_player";
+    player.getPlayerResponse = () => ({
+      videoDetails: { videoId: "abcdefghijk", title: "Current title" }
+    });
+    document.body.append(player);
+    (window as typeof window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse = {
+      videoDetails: { videoId: "abcdefghijk", title: "Initial title" },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [{
+            baseUrl: "https://www.youtube.com/api/timedtext?v=abcdefghijk",
+            languageCode: "en",
+            name: { simpleText: "English" }
+          }]
+        }
+      }
+    };
+
+    expect(readPlayerSnapshotInPage()).toEqual({
+      videoDetails: { videoId: "abcdefghijk", title: "Current title" },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [{
+            baseUrl: "https://www.youtube.com/api/timedtext?v=abcdefghijk",
+            languageCode: "en",
+            name: { simpleText: "English" }
+          }]
+        }
+      }
+    });
+  });
+
+  it("does not merge caption tracks from a stale SPA response", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    const player = document.createElement("div") as HTMLDivElement & {
+      getPlayerResponse: () => unknown;
+    };
+    player.id = "movie_player";
+    player.getPlayerResponse = () => ({
+      videoDetails: { videoId: "abcdefghijk", title: "Current title" }
+    });
+    document.body.append(player);
+    (window as typeof window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse = {
+      ...(snapshotWithUrl("https://www.youtube.com/api/timedtext?v=bbbbbbbbbbb") as object),
+      videoDetails: { videoId: "bbbbbbbbbbb", title: "Stale title" }
+    };
+
+    expect(readPlayerSnapshotInPage()).toEqual({
+      videoDetails: { videoId: "abcdefghijk", title: "Current title" },
+      captions: { playerCaptionsTracklistRenderer: { captionTracks: [] } }
+    });
+  });
+
+  it("rejects a stale response after navigation leaves the watch page", () => {
+    history.replaceState({}, "", "/feed/subscriptions");
+    (window as typeof window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse =
+      snapshotWithUrl("https://www.youtube.com/api/timedtext?v=abcdefghijk");
+
+    expect(readPlayerSnapshotInPage()).toBeNull();
+  });
+
+  it("falls through a malformed live caption track to a usable matching alternate", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    const player = document.createElement("div") as HTMLDivElement & {
+      getPlayerResponse: () => unknown;
+    };
+    player.id = "movie_player";
+    player.getPlayerResponse = () => ({
+      videoDetails: { videoId: "abcdefghijk", title: "Current title" },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [{ baseUrl: "not-a-url", languageCode: "en" }]
+        }
+      }
+    });
+    document.body.append(player);
+    (window as typeof window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse =
+      snapshotWithUrl("https://www.youtube.com/api/timedtext?v=abcdefghijk");
+
+    expect(readPlayerSnapshotInPage()).toMatchObject({
+      videoDetails: { videoId: "abcdefghijk", title: "Current title" },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [{
+            baseUrl: "https://www.youtube.com/api/timedtext?v=abcdefghijk",
+            languageCode: "en-US"
+          }]
+        }
+      }
+    });
+  });
+
+  it("falls through unusable live details to valid same-video alternate details", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    const player = document.createElement("div") as HTMLDivElement & {
+      getPlayerResponse: () => unknown;
+    };
+    player.id = "movie_player";
+    player.getPlayerResponse = () => ({
+      videoDetails: { videoId: "abcdefghijk", title: 42 }
+    });
+    document.body.append(player);
+    (window as typeof window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse =
+      snapshotWithUrl("https://www.youtube.com/api/timedtext?v=abcdefghijk");
+
+    expect(readPlayerSnapshotInPage()).toMatchObject({
+      videoDetails: {
+        videoId: "abcdefghijk",
+        title: "A useful video",
+        author: "Example channel",
+        lengthSeconds: "123.5"
+      }
+    });
+  });
+
+  it("uses a raw configured response when the live player bridge throws", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
+    const player = document.createElement("div") as HTMLDivElement & {
+      getPlayerResponse: () => unknown;
+    };
+    player.id = "movie_player";
+    player.getPlayerResponse = () => {
+      throw new Error("Player is not ready");
+    };
+    document.body.append(player);
+    (window as typeof window & { ytplayer?: unknown }).ytplayer = {
+      config: {
+        args: {
+          raw_player_response: snapshotWithUrl(
+            "https://www.youtube.com/api/timedtext?v=abcdefghijk"
+          )
+        }
+      }
+    };
+
+    expect(readPlayerSnapshotInPage()).toMatchObject({
+      videoDetails: { videoId: "abcdefghijk", title: "A useful video" },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [{ languageCode: "en-US" }]
+        }
+      }
+    });
   });
 });
 

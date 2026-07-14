@@ -380,6 +380,7 @@ describe("side panel", () => {
       startedAt: 1
     });
     const { unmount } = render(<App client={active.client} />);
+    expect(await screen.findByText("Reading YouTube transcript")).toBeTruthy();
     await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(active.sendRuntimeMessage).toHaveBeenCalledWith({
       type: "panel/cancel",

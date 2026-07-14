@@ -1,8 +1,8 @@
 # YouTube Detailed Summary
 
-YouTube Detailed Summary is a local, bring-your-own-key Manifest V3 extension for Chrome and Brave. Open a captioned standard YouTube watch page, click the extension action, and the side panel creates a structured summary with an overview, key takeaways, chronological sections, and seekable timestamps.
+YouTube Detailed Summary is a local, bring-your-own-key Manifest V3 extension for Chrome and Brave. Open a standard YouTube watch page with an available transcript, click the extension action, and the side panel creates a structured summary with an overview, key takeaways, chronological sections, and seekable timestamps.
 
-The MVP has no application backend, account, or telemetry. Captions are obtained from YouTube and sent to the provider you configure. Read [Privacy and data handling](docs/privacy.md) before saving an API key.
+The MVP has no application backend, account, or telemetry. Transcript text is obtained from YouTube's caption tracks or transcript panel and sent to the provider you configure. Read [Privacy and data handling](docs/privacy.md) before saving an API key.
 
 ## Requirements
 
@@ -91,19 +91,20 @@ The cache holds at most 20 entries and 5,000,000 serialized bytes, evicting olde
 
 ## Supported flows
 
-- Standard `https://www.youtube.com/watch?v=<videoId>` pages with an 11-character video ID and available human or automatic captions
+- Standard `https://www.youtube.com/watch?v=<videoId>` pages with an 11-character video ID and an available YouTube transcript
 - Native browser side-panel opening from the extension action
 - Automatic summarization when the panel opens, progress for long-video chunking, cancellation, retry, and regeneration
 - OpenAI Responses, OpenRouter Chat Completions, and custom OpenAI-compatible Chat Completions providers
 - Structured, plain-text rendering; copy to clipboard; and timestamp buttons that seek the active matching video
 - YouTube single-page navigation detection, stale-job cancellation, and bounded local summary caching
-- Visible transcript parsing as a fallback when no usable player caption track is available in the page snapshot
+- JSON3 and legacy XML timed-text parsing from available YouTube caption tracks
+- Automatic opening and reading of YouTube's transcript panel when no usable direct track is available; the panel may briefly become visible on the page
 
 ## Known MVP limitations
 
-- Videos without captions are not transcribed. The extension does not download audio or video and has no speech-to-text service.
+- Videos without a YouTube-provided transcript are not transcribed. The extension does not download audio or video and has no speech-to-text service.
 - Shorts, mobile YouTube, embedded players, channel/search pages, whole playlists, non-YouTube sites, and live streams without a stable transcript are unsupported.
-- Caption discovery relies on YouTube player data and page markup that YouTube may change.
+- Transcript discovery relies on YouTube player data and page markup that YouTube may change.
 - Native Anthropic, Gemini, and other provider-specific APIs are not implemented; use OpenRouter or a compatible endpoint where appropriate.
 - There is no account, cloud sync, shared summary, chat/Q&A, annotation, bookmark, or export workflow beyond copying rendered text.
 - Summary accuracy is limited by caption quality and the selected model. Generated text is paraphrased and may inherit caption or model errors.

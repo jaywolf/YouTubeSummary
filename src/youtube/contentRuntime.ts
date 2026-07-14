@@ -11,7 +11,7 @@ import {
   type TranscriptDependencies
 } from "./extractTranscript";
 import { parseExtensionWatchUrl } from "../domain/watchIdentity";
-import { readVisibleTranscript } from "./visibleTranscript";
+import { readTranscriptFromPage } from "./visibleTranscript";
 
 type ExtractTranscript = typeof extractTranscript;
 
@@ -179,12 +179,14 @@ export function createBrowserTranscriptDependencies(): Pick<
 > {
   return {
     async fetchText(url, signal) {
-      const response = await fetch(url, { signal, credentials: "same-origin" });
+      const captionUrl = new URL(url);
+      captionUrl.searchParams.set("fmt", "json3");
+      const response = await fetch(captionUrl.href, { signal, credentials: "same-origin" });
       if (!response.ok) throw new Error(`Caption request failed with status ${response.status}`);
       return response.text();
     },
-    readVisibleSegments(): TranscriptSegment[] {
-      return readVisibleTranscript(document);
+    async readVisibleSegments(expectedVideoId, signal): Promise<TranscriptSegment[]> {
+      return readTranscriptFromPage(document, expectedVideoId, signal);
     },
     findVideo: () => document.querySelector("video")
   };
