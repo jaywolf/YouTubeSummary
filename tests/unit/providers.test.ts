@@ -526,6 +526,30 @@ describe("provider failure policy", () => {
     expect(repair.input).toContain("not-json");
   });
 
+  it.each([
+    {
+      label: "OpenAI Responses",
+      config: { kind: "openai", apiKey: "synthetic", model: "test" } as ProviderConfig,
+      invalidStream: () => openAiSuccess("not-json")
+    },
+    {
+      label: "OpenAI-compatible Chat Completions",
+      config: { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" } as ProviderConfig,
+      invalidStream: () => chatSuccess("not-json")
+    }
+  ])("preserves transient repair failures for $label", async ({ config, invalidStream }) => {
+    for (const [status, code] of [[429, "rate_limited"], [503, "provider_unavailable"]] as const) {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(invalidStream())
+        .mockResolvedValueOnce(new Response("", { status }));
+      const provider = createProvider(config, fetchMock as typeof fetch);
+
+      await expect(provider.generate(request, () => undefined, signal()))
+        .rejects.toMatchObject({ code, retryable: true, recoveryAction: "retry" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+  });
+
   it("rejects valid OpenAI repair text inside incomplete, failed, error, or refusal envelopes", async () => {
     const repaired = JSON.stringify(summaryContent);
     const envelopes = [

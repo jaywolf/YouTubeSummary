@@ -1,6 +1,7 @@
 import { AppError } from "../domain/errors";
 import type { ProviderConfig } from "../domain/settings";
 import {
+  isAutomaticRetryEligible,
   isProviderContentFiltered,
   normalizeProviderError,
   providerContentFiltered,
@@ -224,7 +225,9 @@ export function createOpenAiCompatibleProvider(
       return validateOutput(repaired, target);
     } catch (error) {
       const normalized = normalizeProviderError(error, config.apiKey);
-      if (normalized.code === "request_canceled") throw normalized;
+      if (normalized.code === "request_canceled" || isAutomaticRetryEligible(normalized)) {
+        throw normalized;
+      }
       throw providerOutputInvalid(error instanceof Error ? error : undefined);
     }
   }
