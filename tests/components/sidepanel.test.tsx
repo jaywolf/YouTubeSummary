@@ -127,13 +127,49 @@ describe("side panel", () => {
     });
   });
 
-  it("does not strand loading when the current start response is null", async () => {
+  it("shows interrupted with Retry when the current start response is null", async () => {
     const fixture = setup(null);
     fixture.client.sendRuntimeMessage = vi.fn(async () => null);
     render(<App client={fixture.client} />);
 
-    expect(await screen.findByText("Summary canceled")).toBeTruthy();
+    expect(await screen.findByText("Summary interrupted")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.queryByText("Reading the current video")).toBeNull();
+  });
+
+  it("shows interrupted with Retry when the current start transport rejects", async () => {
+    const fixture = setup(null);
+    fixture.client.sendRuntimeMessage = vi.fn(async (message) => {
+      if (message.type === "panel/status") return null;
+      throw new Error("synthetic runtime transport failure");
+    });
+    render(<App client={fixture.client} />);
+
+    expect(await screen.findByText("Summary interrupted")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("keeps a genuine navigation cancellation authoritative over a later null start response", async () => {
+    const response = deferred<null>();
+    const fixture = setup(null);
+    fixture.client.sendRuntimeMessage = vi.fn(async (message) =>
+      message.type === "panel/status" ? null : response.promise);
+    render(<App client={fixture.client} />);
+    await vi.waitFor(() => expect((fixture.client.sendRuntimeMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([message]) => message.type === "panel/start"
+    )).toHaveLength(1));
+
+    fixture.port.emit({
+      type: "job/state",
+      requestId: "auto-start",
+      tabId: 4,
+      state: "canceled"
+    });
+    expect(await screen.findByText("Summary canceled")).toBeTruthy();
+    response.resolve(null);
+    await Promise.resolve();
+    expect(screen.getByText("Summary canceled")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("renders unsupported and configuration-required states with the right action", async () => {

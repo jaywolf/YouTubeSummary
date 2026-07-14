@@ -238,7 +238,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
         requestId,
         tabId,
         videoId,
-        state: "canceled",
+        state: "interrupted",
         progress: null,
         startedAt: Date.now()
       }, requestVersion);
