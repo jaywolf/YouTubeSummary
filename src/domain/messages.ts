@@ -1,5 +1,10 @@
 import { z } from "zod";
 import type { SafeAppError } from "./errors";
+import {
+  transcriptPreferenceSchema,
+  transcriptSchema,
+  videoContextSchema
+} from "./video";
 
 const base = { requestId: z.string().min(1), tabId: z.number().int().nonnegative() };
 
@@ -7,6 +12,13 @@ export const appMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("panel/start"), ...base, force: z.boolean() }),
   z.object({ type: z.literal("panel/cancel"), ...base }),
   z.object({ type: z.literal("panel/status"), ...base }),
+  z.object({
+    type: z.literal("youtube/extract"),
+    ...base,
+    context: videoContextSchema,
+    preference: transcriptPreferenceSchema
+  }),
+  z.object({ type: z.literal("youtube/cancel-extract"), ...base }),
   z.object({ type: z.literal("youtube/seek"), ...base, seconds: z.number().nonnegative() }),
   z.object({ type: z.literal("youtube/navigated"), ...base, videoId: z.string().nullable() })
 ]);
@@ -29,4 +41,40 @@ export type BackgroundEvent =
 
 export function parseAppMessage(value: unknown): AppMessage {
   return appMessageSchema.parse(value);
+}
+
+const safeAppErrorSchema = z.object({
+  code: z.enum([
+    "unsupported_page",
+    "video_context_unavailable",
+    "captions_unavailable",
+    "transcript_extraction_failed",
+    "configuration_missing",
+    "configuration_invalid",
+    "custom_permission_denied",
+    "credentials_rejected",
+    "insufficient_credits",
+    "provider_forbidden",
+    "rate_limited",
+    "provider_unavailable",
+    "network_unavailable",
+    "network_timeout",
+    "context_limit_exceeded",
+    "provider_output_invalid",
+    "content_filtered",
+    "request_canceled",
+    "request_interrupted",
+    "internal_error"
+  ]),
+  retryable: z.boolean(),
+  safeMessage: z.string(),
+  recoveryAction: z.enum(["retry", "settings", "change_model", "none"]),
+  retryAfterSeconds: z.number().finite().nonnegative().optional()
+}).strict();
+
+export const transcriptResponseSchema = z.union([transcriptSchema, safeAppErrorSchema]);
+export type TranscriptResponse = z.infer<typeof transcriptResponseSchema>;
+
+export function parseTranscriptResponse(value: unknown): TranscriptResponse {
+  return transcriptResponseSchema.parse(value);
 }
