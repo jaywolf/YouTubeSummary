@@ -6,6 +6,16 @@ type Listener = (
   sendResponse: (response?: unknown) => void
 ) => true | undefined;
 
+const panelSender = {
+  id: "extension-id",
+  url: "chrome-extension://extension-id/sidepanel.html"
+};
+
+const optionsSender = {
+  id: "extension-id",
+  url: "chrome-extension://extension-id/options.html"
+};
+
 afterEach(() => {
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -140,7 +150,7 @@ describe("background controller entrypoint", () => {
     const listener = module.createBackgroundMessageListener(controller as never);
     const sendResponse = vi.fn();
 
-    const returned = listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, {}, sendResponse);
+    const returned = listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, panelSender, sendResponse);
     expect(returned).toBe(true);
     expect(returned).not.toBeInstanceOf(Promise);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith(snapshot));
@@ -169,7 +179,7 @@ describe("background controller entrypoint", () => {
       tabId: 4,
       expectedVideoId: "aaaaaaaaaaa",
       force: false
-    }, {}, sendResponse)).toBe(true);
+    }, panelSender, sendResponse)).toBe(true);
 
     await vi.waitFor(() => expect(reportFailure).toHaveBeenCalledWith("message", failure));
     expect(sendResponse).toHaveBeenCalledWith(null);
@@ -188,6 +198,69 @@ describe("background controller entrypoint", () => {
     await vi.waitFor(() => expect(reportFailure).toHaveBeenCalledWith("initialization", failure));
   });
 
+  it("reports rejected startup once even when a message is waiting on readiness", async () => {
+    const module = await importBackground();
+    const failure = new Error("private startup detail");
+    const ready = Promise.reject(failure);
+    const reportFailure = vi.fn();
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn()
+    };
+    const sendResponse = vi.fn();
+    module.observeBackgroundReady(ready, reportFailure);
+    const listener = module.createBackgroundMessageListener(
+      controller as never,
+      ready,
+      reportFailure
+    );
+
+    expect(listener({
+      type: "panel/status",
+      requestId: "status-after-startup-failure",
+      tabId: 4
+    }, panelSender, sendResponse)).toBe(true);
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith(null));
+    expect(reportFailure).toHaveBeenCalledTimes(1);
+    expect(reportFailure).toHaveBeenCalledWith("initialization", failure);
+    expect(controller.status).not.toHaveBeenCalled();
+  });
+
+  it("rejects panel and options messages from non-extension-page senders", async () => {
+    const module = await importBackground();
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn(),
+      clearSummaryCache: vi.fn()
+    };
+    const listener = module.createBackgroundMessageListener(controller as never);
+    const contentSender = {
+      id: "extension-id",
+      url: "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+      tab: { id: 4, url: "https://www.youtube.com/watch?v=aaaaaaaaaaa" }
+    };
+
+    expect(listener({
+      type: "panel/start",
+      requestId: "untrusted-panel",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    }, contentSender, vi.fn())).toBeUndefined();
+    expect(listener({
+      type: "options/clear-summaries",
+      requestId: "untrusted-options"
+    }, { id: "another-extension", url: "chrome-extension://another-extension/options.html" }, vi.fn()))
+      .toBeUndefined();
+    expect(controller.start).not.toHaveBeenCalled();
+    expect(controller.clearSummaryCache).not.toHaveBeenCalled();
+  });
+
   it("registers synchronously but waits for trusted-storage initialization before handling", async () => {
     const module = await importBackground();
     let markReady!: () => void;
@@ -201,7 +274,7 @@ describe("background controller entrypoint", () => {
     const listener = module.createBackgroundMessageListener(controller as never, ready);
     const sendResponse = vi.fn();
 
-    expect(listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, {}, sendResponse))
+    expect(listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, panelSender, sendResponse))
       .toBe(true);
     expect(controller.start).not.toHaveBeenCalled();
     markReady();
@@ -235,7 +308,7 @@ describe("background controller entrypoint", () => {
     const listener = module.createBackgroundMessageListener(controller as never, ready);
     const sendResponse = vi.fn();
 
-    expect(listener({ type: "panel/status", requestId: "status", tabId: 4 }, {}, sendResponse))
+    expect(listener({ type: "panel/status", requestId: "status", tabId: 4 }, panelSender, sendResponse))
       .toBe(true);
     expect(controller.status).not.toHaveBeenCalled();
     restore();
@@ -255,10 +328,37 @@ describe("background controller entrypoint", () => {
     const listener = module.createBackgroundMessageListener(controller as never);
     const sendResponse = vi.fn();
 
-    expect(listener({ type: "options/clear-summaries", requestId: "clear" }, {}, sendResponse))
+    expect(listener({ type: "options/clear-summaries", requestId: "clear" }, optionsSender, sendResponse))
       .toBe(true);
     await vi.waitFor(() => expect(controller.clearSummaryCache).toHaveBeenCalledOnce());
     expect(sendResponse).toHaveBeenCalledWith({ cleared: true });
+  });
+
+  it("routes panel cancellation through the trusted extension page", async () => {
+    const module = await importBackground();
+    const canceled = {
+      requestId: "cancel-me",
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "canceled"
+    };
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(async () => canceled),
+      status: vi.fn(),
+      navigated: vi.fn()
+    };
+    const listener = module.createBackgroundMessageListener(controller as never);
+    const sendResponse = vi.fn();
+
+    expect(listener({
+      type: "panel/cancel",
+      requestId: "cancel-me",
+      tabId: 4
+    }, panelSender, sendResponse)).toBe(true);
+
+    await vi.waitFor(() => expect(controller.cancel).toHaveBeenCalledWith(4, "cancel-me"));
+    expect(sendResponse).toHaveBeenCalledWith(canceled);
   });
 
   it("broadcasts only through summary-panel ports and removes disconnected ports", async () => {

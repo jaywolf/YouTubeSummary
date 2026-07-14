@@ -191,6 +191,16 @@ function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender 
   }
 }
 
+function isTrustedExtensionPageSender(sender: MessageSender): boolean {
+  if (sender.id !== browser.runtime.id || sender.tab !== undefined) return false;
+  try {
+    const url = new URL(sender.url ?? "");
+    return url.protocol === "chrome-extension:" && url.host === browser.runtime.id;
+  } catch {
+    return false;
+  }
+}
+
 export function createBackgroundMessageListener(
   controller: MessageController,
   ready: Promise<unknown> = Promise.resolve(),
@@ -215,9 +225,11 @@ export function createBackgroundMessageListener(
         && message.type !== "panel/status"
         && message.type !== "options/clear-summaries") {
       return undefined;
+    } else if (!isTrustedExtensionPageSender(sender)) {
+      return undefined;
     }
 
-    const response: Promise<unknown> = ready.then(async (): Promise<unknown> => {
+    const routeMessage = async (): Promise<unknown> => {
       if (message.type === "youtube/navigated") {
         const identity = parseExtensionWatchUrl(sender.tab!.url ?? "");
         return await controller.navigated(sender.tab!.id!, identity?.videoId ?? null);
@@ -231,11 +243,19 @@ export function createBackgroundMessageListener(
         return { cleared: true };
       }
       return controller.status(message.tabId);
-    });
-    void response.then(
-      (result) => sendResponse(result),
-      (error) => {
-        reportFailure("message", error);
+    };
+    void ready.then(
+      () => {
+        void routeMessage().then(
+          (result) => sendResponse(result),
+          (error) => {
+            reportFailure("message", error);
+            sendResponse(null);
+          }
+        );
+      },
+      () => {
+        // Startup failure is reported once by observeBackgroundReady.
         sendResponse(null);
       }
     );

@@ -137,6 +137,35 @@ describe("background transcript bridge", () => {
     });
   });
 
+  it("preserves a structured content-script error and retry metadata", async () => {
+    sendMessage.mockResolvedValueOnce({
+      code: "rate_limited",
+      retryable: true,
+      safeMessage: "The provider is busy.",
+      recoveryAction: "retry",
+      retryAfterSeconds: 7
+    });
+
+    await expect(background.extractTranscriptWithContext(
+      9,
+      "request-safe-error",
+      {
+        videoId: "abcdefghijk",
+        canonicalUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+        title: "Video",
+        channel: "Channel",
+        durationSeconds: 12,
+        captionTracks: [transcript.track]
+      },
+      { preferredLanguage: null, browserLanguage: "en-US" }
+    )).rejects.toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      recoveryAction: "retry",
+      retryAfterSeconds: 7
+    });
+  });
+
   it("stops awaiting the content bridge when the controller aborts", async () => {
     sendMessage.mockImplementationOnce(() => new Promise((resolve) => {
       setTimeout(() => resolve(transcript), 25);
