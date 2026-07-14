@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppMessage } from "../../src/domain/messages";
 import type { Transcript, VideoContext } from "../../src/domain/video";
 import {
+  createChromeMessageListener,
   createYouTubeMessageHandler,
   sendYouTubeNavigation
 } from "../../src/youtube/contentRuntime";
@@ -140,6 +141,72 @@ describe("YouTube SPA navigation", () => {
       requestId: "navigation-1",
       tabId: 0,
       videoId: expectedVideoId
+    });
+  });
+});
+
+describe("Chrome 114 runtime listener adapter", () => {
+  it("returns literal true and responds exactly once after recognized work settles", async () => {
+    let resolveHandler: ((value: Transcript) => void) | undefined;
+    const handler = vi.fn(() => new Promise<Transcript>((resolve) => {
+      resolveHandler = resolve;
+    }));
+    const sendResponse = vi.fn();
+    const listener = createChromeMessageListener(handler);
+
+    const returned = listener(extractMessage, {}, sendResponse);
+
+    expect(returned).toBe(true);
+    expect(sendResponse).not.toHaveBeenCalled();
+    resolveHandler?.(transcript);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledOnce());
+    expect(sendResponse).toHaveBeenCalledWith(transcript);
+  });
+
+  it.each([
+    { type: "youtube/cancel-extract", requestId: "extract-1", tabId: 7 },
+    { type: "youtube/seek", requestId: "seek-1", tabId: 7, seconds: 4 }
+  ])("keeps the channel open for recognized $type work", async (message) => {
+    const handler = vi.fn(async () => undefined);
+    const sendResponse = vi.fn();
+    const listener = createChromeMessageListener(handler);
+
+    expect(listener(message, {}, sendResponse)).toBe(true);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledOnce());
+    expect(handler).toHaveBeenCalledWith(message);
+  });
+
+  it.each([
+    ["invalid", { type: "youtube/extract" }],
+    ["panel message", { type: "panel/status", requestId: "status-1", tabId: 7 }],
+    ["navigation notice", {
+      type: "youtube/navigated",
+      requestId: "navigation-1",
+      tabId: 0,
+      videoId: "abcdefghijk"
+    }]
+  ])("does not claim an unrelated or %s message", (_label, message) => {
+    const handler = vi.fn(async () => transcript);
+    const sendResponse = vi.fn();
+    const listener = createChromeMessageListener(handler);
+
+    expect(listener(message, {}, sendResponse)).toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+    expect(sendResponse).not.toHaveBeenCalled();
+  });
+
+  it("converts an unexpected handler rejection to one safe internal-error response", async () => {
+    const handler = vi.fn(async () => { throw new Error("private rejection details"); });
+    const sendResponse = vi.fn();
+    const listener = createChromeMessageListener(handler);
+
+    expect(listener(extractMessage, {}, sendResponse)).toBe(true);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledOnce());
+    expect(sendResponse).toHaveBeenCalledWith({
+      code: "internal_error",
+      retryable: true,
+      safeMessage: "The transcript could not be extracted.",
+      recoveryAction: "retry"
     });
   });
 });

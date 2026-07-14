@@ -1,5 +1,6 @@
 import {
   createBrowserTranscriptDependencies,
+  createChromeMessageListener,
   createYouTubeMessageHandler,
   sendYouTubeNavigation
 } from "../src/youtube/contentRuntime";
@@ -15,7 +16,7 @@ export default defineContentScript({
       extract: extractTranscript
     }, controllers);
 
-    browser.runtime.onMessage.addListener((message) => handler(message));
+    browser.runtime.onMessage.addListener(createChromeMessageListener(handler));
 
     document.addEventListener("yt-navigate-finish", () => {
       void sendYouTubeNavigation(

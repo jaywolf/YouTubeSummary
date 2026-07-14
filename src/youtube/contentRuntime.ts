@@ -20,6 +20,16 @@ export type YouTubeContentDependencies = TranscriptDependencies & {
   findVideo: () => HTMLVideoElement | null;
 };
 
+export type YouTubeMessageHandler = (
+  value: unknown
+) => Promise<TranscriptResponse | undefined>;
+
+export type ChromeMessageListener = (
+  value: unknown,
+  sender: unknown,
+  sendResponse: (response?: unknown) => void
+) => true | undefined;
+
 function canceledResponse(): TranscriptResponse {
   return {
     code: "request_canceled",
@@ -41,7 +51,7 @@ function internalResponse(): TranscriptResponse {
 export function createYouTubeMessageHandler(
   dependencies: YouTubeContentDependencies,
   controllers: Map<string, AbortController> = new Map()
-): (value: unknown) => Promise<TranscriptResponse | undefined> {
+): YouTubeMessageHandler {
   return async (value) => {
     let message: AppMessage;
     try {
@@ -92,6 +102,39 @@ export function createYouTubeMessageHandler(
         controllers.delete(message.requestId);
       }
     }
+  };
+}
+
+export function createChromeMessageListener(
+  handler: YouTubeMessageHandler
+): ChromeMessageListener {
+  return (value, _sender, sendResponse) => {
+    let message: AppMessage;
+    try {
+      message = parseAppMessage(value);
+    } catch {
+      return undefined;
+    }
+
+    if (message.type !== "youtube/extract" &&
+        message.type !== "youtube/cancel-extract" &&
+        message.type !== "youtube/seek") {
+      return undefined;
+    }
+
+    let response: Promise<TranscriptResponse | undefined>;
+    try {
+      response = handler(message);
+    } catch {
+      sendResponse(internalResponse());
+      return true;
+    }
+
+    void response.then(
+      (value) => sendResponse(value),
+      () => sendResponse(internalResponse())
+    );
+    return true;
   };
 }
 
