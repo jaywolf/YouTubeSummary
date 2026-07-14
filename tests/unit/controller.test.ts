@@ -440,8 +440,35 @@ describe("SummaryController", () => {
 
     const missing = setup({ loadSettings: vi.fn(async () => DEFAULT_SETTINGS) });
     await expect(missing.controller.start({ requestId: "missing", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
-      .resolves.toMatchObject({ state: "error", error: { code: "configuration_missing" } });
+      .resolves.toMatchObject({
+        state: "error",
+        error: {
+          code: "configuration_missing",
+          retryable: false,
+          recoveryAction: "settings"
+        }
+      });
     expect(missing.dependencies.createProvider).not.toHaveBeenCalled();
+
+    const invalid = setup({
+      loadSettings: vi.fn(async () => {
+        throw new Error("private invalid settings detail");
+      })
+    });
+    await expect(invalid.controller.start({
+      requestId: "invalid-settings",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    })).resolves.toMatchObject({
+      state: "error",
+      error: {
+        code: "configuration_invalid",
+        retryable: false,
+        recoveryAction: "settings"
+      }
+    });
+    expect(invalid.dependencies.createProvider).not.toHaveBeenCalled();
 
     const captions = setup({
       extractTranscript: vi.fn(async () => {

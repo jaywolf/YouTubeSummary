@@ -1,7 +1,7 @@
 # YouTube Summary Extension Design
 
 **Date:** 2026-07-13  
-**Status:** Approved by the user on 2026-07-13
+**Status:** Approved by the user on 2026-07-13; implementation updated on 2026-07-14 to use live authenticated OpenAI and OpenRouter model catalogs
 **Target:** Google Chrome 114+ and current Brave releases with Chromium extension compatibility
 
 ## 1. Product Summary
@@ -79,7 +79,7 @@ Use WXT with React and TypeScript to generate a Manifest V3 extension. WXT owns 
 | Context | Responsibility |
 | --- | --- |
 | Side panel | Render current state, initiate or cancel summarization, stream progress, copy output, open settings, and send timestamp seek commands. |
-| Options page | Configure provider, API key, model, custom base URL, caption preference, output language, and cache behavior; test the selected provider; clear credentials and cached summaries. |
+| Options page | Configure provider, API key, API-backed model selection, custom base URL, caption preference, output language, and cache behavior; test the selected provider; clear credentials and cached summaries. |
 | Background service worker | Orchestrate jobs, enforce one active job per tab, call providers, manage cancellation, perform caching, map errors, and keep API keys out of the YouTube page context. |
 | YouTube content script | Validate the page, report video metadata, request sanitized caption-track data from the page context, extract the visible transcript as fallback, and seek the player to a timestamp. It never reads provider credentials. |
 | Main-world bridge | Read the minimum player response needed to identify caption tracks and return a sanitized serializable object. It does not retain state, call providers, or expose extension data to the page. |
@@ -206,8 +206,8 @@ Chunk requests run sequentially in the MVP. This makes cancellation, provider ra
 
 | Provider | Endpoint behavior | Required settings |
 | --- | --- | --- |
-| OpenAI | Native Responses API adapter | API key and model ID |
-| OpenRouter | OpenAI-compatible Chat Completions adapter at the fixed OpenRouter base URL | API key and OpenRouter model slug |
+| OpenAI | Native Responses API adapter; authenticated model discovery through `GET /v1/models` | API key and a catalog-selected exact model ID, with an advanced manual fallback |
+| OpenRouter | OpenAI-compatible Chat Completions adapter at the fixed OpenRouter base URL; authenticated compatible-text model discovery through `GET /api/v1/models` | API key and a catalog-selected exact model ID, with an advanced manual fallback |
 | Custom | OpenAI-compatible Chat Completions adapter | HTTPS base URL, API key, and model ID |
 
 The custom base URL must use HTTPS except for `http://localhost` and `http://127.0.0.1`, which are allowed for local development. It may include a path prefix but must not contain credentials, query parameters, or fragments.
@@ -228,8 +228,10 @@ The UI never branches on provider-specific response bodies.
 
 ### 8.3 Model selection
 
-- OpenAI uses a user-editable model ID with a documented initial suggestion rather than a permanently hard-coded "latest" alias.
-- OpenRouter loads the current model catalog only after the user supplies a valid key, caches it briefly, and still permits manual model-slug entry.
+- OpenAI and OpenRouter never use a bundled static model-ID list. The settings page requests each provider's current authenticated model catalog after the user accepts the BYOK disclosure.
+- The chooser displays a readable provider name when available while storing and sending the provider's exact returned ID internally.
+- Saved credentials may refresh their provider catalog automatically. A new unsaved key is not transmitted until the user accepts the local-key disclosure.
+- Catalog loading has safe loading, empty, and failure states plus an explicit **Use a model not shown** advanced fallback.
 - Custom endpoints use manual model entry in the MVP; model discovery is not assumed.
 
 The extension does not silently change the selected model.

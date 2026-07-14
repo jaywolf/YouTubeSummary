@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { MessageController } from "../../entrypoints/background";
 
 type Listener = (
   message: unknown,
@@ -15,6 +16,22 @@ const optionsSender = {
   id: "extension-id",
   url: "chrome-extension://extension-id/options.html"
 };
+
+const tabbedOptionsSender = {
+  ...optionsSender,
+  tab: { id: 12, url: "chrome-extension://extension-id/options.html" }
+};
+
+function createController(overrides: Partial<MessageController> = {}) {
+  return {
+    start: vi.fn<MessageController["start"]>(),
+    cancel: vi.fn<MessageController["cancel"]>(),
+    status: vi.fn<MessageController["status"]>(),
+    navigated: vi.fn<MessageController["navigated"]>(),
+    clearSummaryCache: vi.fn<MessageController["clearSummaryCache"]>(),
+    ...overrides
+  } satisfies MessageController;
+}
 
 afterEach(() => {
   vi.resetModules();
@@ -36,13 +53,13 @@ async function importBackground() {
 describe("background controller entrypoint", () => {
   it("uses the content-script sender tab as authoritative navigation identity", async () => {
     const module = await importBackground();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn(async () => undefined)
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
     const sendResponse = vi.fn();
 
     const returned = listener({
@@ -66,13 +83,13 @@ describe("background controller entrypoint", () => {
 
   it("rejects navigation from a non-YouTube or tabless sender", async () => {
     const module = await importBackground();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn(async () => undefined)
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
 
     expect(listener({
       type: "youtube/navigated",
@@ -86,13 +103,13 @@ describe("background controller entrypoint", () => {
 
   it("accepts a trusted YouTube navigation away from a watch page", async () => {
     const module = await importBackground();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn(async () => undefined)
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
 
     expect(listener({
       type: "youtube/navigated",
@@ -108,13 +125,13 @@ describe("background controller entrypoint", () => {
 
   it("trusts authoritative sender.tab.url instead of the non-authoritative sender URL", async () => {
     const module = await importBackground();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn(async () => undefined)
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
     const message = {
       type: "youtube/navigated",
       requestId: "navigation",
@@ -140,14 +157,21 @@ describe("background controller entrypoint", () => {
 
   it("adapts panel promises with sendResponse and literal true for Chrome 114", async () => {
     const module = await importBackground();
-    const snapshot = { requestId: "start", tabId: 4, videoId: "aaaaaaaaaaa", state: "loading_video" };
-    const controller = {
+    const snapshot = {
+      requestId: "start",
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "loading_video" as const,
+      progress: null,
+      startedAt: 0
+    };
+    const controller = createController({
       start: vi.fn(async () => snapshot),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn()
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
     const sendResponse = vi.fn();
 
     const returned = listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, panelSender, sendResponse);
@@ -159,15 +183,15 @@ describe("background controller entrypoint", () => {
   it("reports rejected message work without exposing it in the response", async () => {
     const module = await importBackground();
     const failure = new Error("private provider detail");
-    const controller = {
+    const controller = createController({
       start: vi.fn(async () => { throw failure; }),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn()
-    };
+    });
     const reportFailure = vi.fn();
     const listener = module.createBackgroundMessageListener(
-      controller as never,
+      controller,
       Promise.resolve(),
       reportFailure
     );
@@ -203,16 +227,16 @@ describe("background controller entrypoint", () => {
     const failure = new Error("private startup detail");
     const ready = Promise.reject(failure);
     const reportFailure = vi.fn();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn()
-    };
+    });
     const sendResponse = vi.fn();
     module.observeBackgroundReady(ready, reportFailure);
     const listener = module.createBackgroundMessageListener(
-      controller as never,
+      controller,
       ready,
       reportFailure
     );
@@ -231,14 +255,14 @@ describe("background controller entrypoint", () => {
 
   it("rejects panel and options messages from non-extension-page senders", async () => {
     const module = await importBackground();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn(),
       clearSummaryCache: vi.fn()
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
     const contentSender = {
       id: "extension-id",
       url: "https://www.youtube.com/watch?v=aaaaaaaaaaa",
@@ -265,13 +289,13 @@ describe("background controller entrypoint", () => {
     const module = await importBackground();
     let markReady!: () => void;
     const ready = new Promise<void>((resolve) => { markReady = resolve; });
-    const controller = {
+    const controller = createController({
       start: vi.fn(async () => null),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn()
-    };
-    const listener = module.createBackgroundMessageListener(controller as never, ready);
+    });
+    const listener = module.createBackgroundMessageListener(controller, ready);
     const sendResponse = vi.fn();
 
     expect(listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, panelSender, sendResponse))
@@ -289,7 +313,9 @@ describe("background controller entrypoint", () => {
       requestId: "restored",
       tabId: 4,
       videoId: "aaaaaaaaaaa",
-      state: "interrupted"
+      state: "interrupted" as const,
+      progress: null,
+      startedAt: 0
     };
     let restored = false;
     const ready = new Promise<void>((resolve) => {
@@ -298,14 +324,14 @@ describe("background controller entrypoint", () => {
         resolve();
       };
     });
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(() => restored ? interrupted : null),
       navigated: vi.fn(),
       clearSummaryCache: vi.fn()
-    };
-    const listener = module.createBackgroundMessageListener(controller as never, ready);
+    });
+    const listener = module.createBackgroundMessageListener(controller, ready);
     const sendResponse = vi.fn();
 
     expect(listener({ type: "panel/status", requestId: "status", tabId: 4 }, panelSender, sendResponse))
@@ -318,18 +344,38 @@ describe("background controller entrypoint", () => {
 
   it("routes cache clearing through the gated background controller", async () => {
     const module = await importBackground();
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(),
       status: vi.fn(),
       navigated: vi.fn(),
       clearSummaryCache: vi.fn(async () => undefined)
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
     const sendResponse = vi.fn();
 
     expect(listener({ type: "options/clear-summaries", requestId: "clear" }, optionsSender, sendResponse))
       .toBe(true);
+    await vi.waitFor(() => expect(controller.clearSummaryCache).toHaveBeenCalledOnce());
+    expect(sendResponse).toHaveBeenCalledWith({ cleared: true });
+  });
+
+  it("accepts the options page when Chrome associates its extension sender with a tab", async () => {
+    const module = await importBackground();
+    const controller = createController({
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn(),
+      clearSummaryCache: vi.fn(async () => undefined)
+    });
+    const listener = module.createBackgroundMessageListener(controller);
+    const sendResponse = vi.fn();
+
+    expect(listener({
+      type: "options/clear-summaries",
+      requestId: "clear-from-tabbed-options"
+    }, tabbedOptionsSender, sendResponse)).toBe(true);
     await vi.waitFor(() => expect(controller.clearSummaryCache).toHaveBeenCalledOnce());
     expect(sendResponse).toHaveBeenCalledWith({ cleared: true });
   });
@@ -340,15 +386,17 @@ describe("background controller entrypoint", () => {
       requestId: "cancel-me",
       tabId: 4,
       videoId: "aaaaaaaaaaa",
-      state: "canceled"
+      state: "canceled" as const,
+      progress: null,
+      startedAt: 0
     };
-    const controller = {
+    const controller = createController({
       start: vi.fn(),
       cancel: vi.fn(async () => canceled),
       status: vi.fn(),
       navigated: vi.fn()
-    };
-    const listener = module.createBackgroundMessageListener(controller as never);
+    });
+    const listener = module.createBackgroundMessageListener(controller);
     const sendResponse = vi.fn();
 
     expect(listener({

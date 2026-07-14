@@ -73,14 +73,43 @@ describe("model catalog", () => {
     await expect(loadModelCatalog("openai", "synthetic-secret", fetcher)).resolves.toEqual([]);
   });
 
+  it("rejects an empty key before making a provider request", async () => {
+    const fetcher = vi.fn(async () => jsonResponse({ data: [] }));
+
+    await expect(loadModelCatalog("openai", "  \n\t ", fetcher)).rejects.toThrow(
+      "Models could not be loaded. Check the API key and try again."
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("enforces catalog and display bounds", async () => {
+    const data = Array.from({ length: 5_001 }, (_, index) => ({
+      id: index === 0 ? "x".repeat(257) : `vendor/model-${index}`,
+      name: index === 1 ? "L".repeat(200) : `Model ${index}`
+    }));
+    const fetcher = vi.fn(async () => jsonResponse({ data }));
+
+    const models = await loadModelCatalog("openrouter", "synthetic-secret", fetcher);
+    expect(models).toHaveLength(4_999);
+    expect(models[0]).toEqual({
+      id: "vendor/model-1",
+      label: "L".repeat(160)
+    });
+    expect(models.some((model) => model.id === "vendor/model-5000")).toBe(false);
+  });
+
   it("maps provider and payload failures to one safe error without leaking secrets", async () => {
     const secret = "catalog-synthetic-secret";
     const rawProviderBody = "RAW PROVIDER BODY catalog-synthetic-secret";
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const rejected = vi.fn(async () => new Response(rawProviderBody, { status: 401 }));
     const malformed = vi.fn(async () => jsonResponse({ data: "not-an-array", secret }));
+    const invalidJson = vi.fn(async () => new Response("not-json " + secret, { status: 200 }));
+    const networkFailure = vi.fn(async () => {
+      throw new Error("RAW network failure " + secret);
+    });
 
-    for (const fetcher of [rejected, malformed]) {
+    for (const fetcher of [rejected, malformed, invalidJson, networkFailure]) {
       let thrown: unknown;
       try {
         await loadModelCatalog("openai", secret, fetcher);
@@ -119,5 +148,28 @@ describe("model catalog", () => {
     expect((thrown as DOMException).name).toBe("AbortError");
     expect(String(thrown)).not.toContain("catalog-synthetic-secret");
     expect(String(thrown)).not.toContain("RAW");
+  });
+
+  it("normalizes a fetch AbortError without forwarding its details", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn(async () => {
+      throw new DOMException("RAW abort detail", "AbortError");
+    });
+
+    let thrown: unknown;
+    try {
+      await loadModelCatalog(
+        "openai",
+        "catalog-synthetic-secret",
+        fetcher,
+        controller.signal
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DOMException);
+    expect((thrown as DOMException).name).toBe("AbortError");
+    expect(String(thrown)).not.toContain("RAW");
+    expect(String(thrown)).not.toContain("catalog-synthetic-secret");
   });
 });

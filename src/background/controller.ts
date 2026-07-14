@@ -73,16 +73,27 @@ type StartReservation = {
   videoId: string;
 };
 
-function appError(code: SafeAppError["code"], safeMessage: string): AppError {
-  const settingsCodes = new Set<SafeAppError["code"]>([
+type ControllerPreflightErrorCode =
+  | "unsupported_page"
+  | "video_context_unavailable"
+  | "configuration_missing"
+  | "configuration_invalid";
+
+function appError(code: ControllerPreflightErrorCode, safeMessage: string): AppError {
+  const settingsCodes = new Set<ControllerPreflightErrorCode>([
     "configuration_missing",
     "configuration_invalid"
   ]);
+  const recoveryAction = settingsCodes.has(code)
+    ? "settings"
+    : code === "unsupported_page"
+      ? "none"
+      : "retry";
   return new AppError({
     code,
-    retryable: code !== "unsupported_page",
+    retryable: recoveryAction === "retry",
     safeMessage,
-    recoveryAction: settingsCodes.has(code) ? "settings" : code === "unsupported_page" ? "none" : "retry"
+    recoveryAction
   });
 }
 

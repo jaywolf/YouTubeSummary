@@ -152,7 +152,7 @@ type MessageSender = {
   tab?: { id?: number | undefined; url?: string | undefined } | undefined;
 };
 
-type MessageController = Pick<
+export type MessageController = Pick<
   SummaryController,
   "start" | "cancel" | "status" | "navigated" | "clearSummaryCache"
 >;
@@ -192,7 +192,7 @@ function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender 
 }
 
 function isTrustedExtensionPageSender(sender: MessageSender): boolean {
-  if (sender.id !== browser.runtime.id || sender.tab !== undefined) return false;
+  if (sender.id !== browser.runtime.id) return false;
   try {
     const url = new URL(sender.url ?? "");
     return url.protocol === "chrome-extension:" && url.host === browser.runtime.id;

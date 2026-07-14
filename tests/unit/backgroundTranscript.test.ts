@@ -33,10 +33,16 @@ const transcript = {
 describe("background transcript bridge", () => {
   let background: typeof import("../../entrypoints/background");
   let installedListener: (() => unknown) | undefined;
-  const executeScript = vi.fn(async () => [{ frameId: 0, result: rawSnapshot }]);
+  const executeScript = vi.fn<(
+    input?: unknown
+  ) => Promise<Array<{ frameId: number; result: unknown }>>>(
+    async () => [{ frameId: 0, result: rawSnapshot }]
+  );
   const sendMessage = vi.fn<() => Promise<unknown>>(async () => transcript);
   const localSetAccessLevel = vi.fn(async () => undefined);
   const sessionSetAccessLevel = vi.fn(async () => undefined);
+  const sessionGet = vi.fn(async () => ({}));
+  const sessionSet = vi.fn(async () => undefined);
   const setPanelBehavior = vi.fn(async () => undefined);
 
   beforeAll(async () => {
@@ -56,7 +62,11 @@ describe("background transcript bridge", () => {
       },
       storage: {
         local: { setAccessLevel: localSetAccessLevel },
-        session: { setAccessLevel: sessionSetAccessLevel }
+        session: {
+          setAccessLevel: sessionSetAccessLevel,
+          get: sessionGet,
+          set: sessionSet
+        }
       },
       sidePanel: { setPanelBehavior }
     });
@@ -86,6 +96,7 @@ describe("background transcript bridge", () => {
   });
 
   it("enforces trusted storage on every startup and configures the panel idempotently", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const definition = (background as unknown as { default: () => void | Promise<void> }).default;
     await definition();
 
@@ -94,11 +105,17 @@ describe("background transcript bridge", () => {
     expect(sessionSetAccessLevel).toHaveBeenCalledOnce();
     expect(sessionSetAccessLevel).toHaveBeenCalledWith({ accessLevel: "TRUSTED_CONTEXTS" });
     expect(setPanelBehavior).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenCalledWith({
+      "activeJobs.v1": { version: 1, jobs: [] }
+    }));
+    expect(sessionGet).toHaveBeenCalledWith("activeJobs.v1");
+    expect(consoleError).not.toHaveBeenCalled();
 
     await installedListener?.();
     expect(setPanelBehavior).toHaveBeenCalledTimes(2);
     expect(localSetAccessLevel).toHaveBeenCalledOnce();
     expect(sessionSetAccessLevel).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
   });
 
   it("forwards explicit serializable cancellation", async () => {
@@ -122,6 +139,24 @@ describe("background transcript bridge", () => {
       code: "transcript_extraction_failed",
       safeMessage: "The transcript could not be extracted."
     });
+  });
+
+  it("maps a missing sanitized video context to a safe context error", async () => {
+    executeScript.mockResolvedValueOnce([{ frameId: 0, result: null }]);
+
+    await expect(background.extractTranscriptFromTab(
+      9,
+      "request-no-context",
+      { preferredLanguage: null, browserLanguage: "en-US" }
+    )).rejects.toMatchObject({
+      code: "video_context_unavailable",
+      retryable: true,
+      recoveryAction: "retry",
+      safeMessage: "The video context could not be read."
+    });
+    expect(sendMessage).not.toHaveBeenCalledWith(9, expect.objectContaining({
+      requestId: "request-no-context"
+    }));
   });
 
   it("maps an invalid content-script response to a safe extraction error", async () => {
