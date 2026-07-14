@@ -34,6 +34,10 @@ const matches = manifest.content_scripts?.[0]?.matches;
 if (mode === "production") {
   assert.deepEqual(manifest.host_permissions, fixedHosts);
   assert.deepEqual(matches, ["https://www.youtube.com/*"]);
+  // These compiled markers are deliberate defense-in-depth canaries for the
+  // compile-time test branches. If WXT/minification changes them, update the
+  // marker only after confirming the corresponding source branch is still
+  // absent from production and present in the isolated test build.
   assert.equal(background.includes("port===``||"), false,
     "production background must not contain the loopback watch adapter");
   assert.equal(background.includes("origin===`https://www.youtube.com`||"), false,

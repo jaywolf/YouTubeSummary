@@ -116,12 +116,13 @@ pnpm typecheck
 pnpm test
 pnpm test:watch
 pnpm test:manifest
+pnpm test:manifest:test
 pnpm build:test
 pnpm test:extension
 pnpm check
 ```
 
-`pnpm check` runs type checking, the Vitest suite, and the production manifest test. Packaged-extension testing is separate: build test mode with `pnpm build:test`, then run `pnpm test:extension`.
+`pnpm check` runs type checking, the Vitest suite, and both production and test-mode manifest assertions. Before the first packaged-extension run, install Playwright's matching Chromium binary with `pnpm exec playwright install chromium`. Then run `pnpm test:extension`; that script builds the isolated test package before launching it.
 
 ## Privacy
 
