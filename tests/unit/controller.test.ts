@@ -8,6 +8,12 @@ import {
   SummaryController,
   type SummaryControllerDependencies
 } from "../../src/background/controller";
+import { JobRegistry } from "../../src/background/jobRegistry";
+import {
+  ACTIVE_JOBS_STORAGE_KEY,
+  ActiveJobStore,
+  type StorageAreaAdapter
+} from "../../src/platform/storage";
 
 const contextA: VideoContext = {
     videoId: "aaaaaaaaaaa",
@@ -63,7 +69,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function setup(overrides: Partial<SummaryControllerDependencies> = {}) {
+function setup(
+  overrides: Partial<SummaryControllerDependencies> = {},
+  registry?: JobRegistry
+) {
   const events: unknown[] = [];
   const provider: ProviderClient = {
     testConnection: vi.fn(async () => undefined),
@@ -94,10 +103,221 @@ function setup(overrides: Partial<SummaryControllerDependencies> = {}) {
     emit: (event) => events.push(event),
     ...overrides
   };
-  return { controller: new SummaryController(dependencies), dependencies, events, provider };
+  return { controller: new SummaryController(dependencies, registry), dependencies, events, provider };
 }
 
 describe("SummaryController", () => {
+  it("cancels before page work when the authoritative tab differs from expected video", async () => {
+    const fixture = setup({
+      getTab: vi.fn(async (tabId) => ({ id: tabId, active: true, url: contextB.canonicalUrl }))
+    });
+
+    await expect(fixture.controller.start({
+      requestId: "identity-mismatch",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    })).resolves.toMatchObject({ state: "canceled", videoId: "aaaaaaaaaaa" });
+    expect(fixture.dependencies.readVideoContext).not.toHaveBeenCalled();
+    expect(fixture.dependencies.extractTranscript).not.toHaveBeenCalled();
+    expect(fixture.dependencies.createProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps early same-video navigation but cancels early different navigation", async () => {
+    const tab = deferred<{ id: number; active: boolean; url: string }>();
+    const same = setup({ getTab: vi.fn(async () => tab.promise) });
+    const sameStart = same.controller.start({
+      requestId: "early-same",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    });
+    await vi.waitFor(() => expect(same.dependencies.getTab).toHaveBeenCalledOnce());
+    await same.controller.navigated(4, "aaaaaaaaaaa");
+    tab.resolve({ id: 4, active: true, url: contextA.canonicalUrl });
+    await expect(sameStart).resolves.toMatchObject({ state: "complete" });
+
+    const otherTab = deferred<{ id: number; active: boolean; url: string }>();
+    const different = setup({ getTab: vi.fn(async () => otherTab.promise) });
+    const differentStart = different.controller.start({
+      requestId: "early-different",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    });
+    await vi.waitFor(() => expect(different.dependencies.getTab).toHaveBeenCalledOnce());
+    await different.controller.navigated(4, "bbbbbbbbbbb");
+    otherTab.resolve({ id: 4, active: true, url: contextA.canonicalUrl });
+    await expect(differentStart).resolves.toBeNull();
+    expect(different.dependencies.readVideoContext).not.toHaveBeenCalled();
+    expect(different.events).toContainEqual(expect.objectContaining({
+      type: "job/state",
+      requestId: "early-different",
+      state: "canceled"
+    }));
+  });
+
+  it("cancels early null navigation before page or provider work", async () => {
+    const tab = deferred<{ id: number; active: boolean; url: string }>();
+    const fixture = setup({ getTab: vi.fn(async () => tab.promise) });
+    const start = fixture.controller.start({
+      requestId: "early-null",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    });
+    await vi.waitFor(() => expect(fixture.dependencies.getTab).toHaveBeenCalledOnce());
+
+    await fixture.controller.navigated(4, null);
+    tab.resolve({ id: 4, active: true, url: contextA.canonicalUrl });
+    await expect(start).resolves.toBeNull();
+    expect(fixture.dependencies.readVideoContext).not.toHaveBeenCalled();
+    expect(fixture.dependencies.createProvider).not.toHaveBeenCalled();
+  });
+
+  it("completes and clears the session snapshot before attempting a cache write", async () => {
+    const storage: StorageAreaAdapter & { values: Record<string, unknown> } = {
+      values: {},
+      async get(key) {
+        return key in this.values ? { [key]: structuredClone(this.values[key]) } : {};
+      },
+      async set(items) {
+        Object.assign(this.values, structuredClone(items));
+      }
+    };
+    const store = new ActiveJobStore(storage);
+    const registry = new JobRegistry(() => "ordered", () => 123, store);
+    let fixture!: ReturnType<typeof setup>;
+    fixture = setup({
+      summaryCache: {
+        get: vi.fn(async () => null),
+        set: vi.fn(async () => {
+          expect(fixture.controller.status(4)).toMatchObject({
+            requestId: "ordered",
+            state: "complete"
+          });
+          expect(storage.values[ACTIVE_JOBS_STORAGE_KEY]).toEqual({ version: 1, jobs: [] });
+          return true;
+        }),
+        writeToken: vi.fn(() => 0),
+        clear: vi.fn(async () => undefined)
+      }
+    }, registry);
+
+    await expect(fixture.controller.start({
+      requestId: "ordered",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    })).resolves.toMatchObject({ state: "complete" });
+  });
+
+  it("does not emit an old completion after a newer start reserves the tab during cache commit", async () => {
+    const commit = deferred<boolean>();
+    const secondTab = deferred<{ id: number; active: boolean; url: string }>();
+    let tabCalls = 0;
+    let current!: () => boolean;
+    let fixture!: ReturnType<typeof setup>;
+    fixture = setup({
+      getTab: vi.fn(async () => ++tabCalls === 1
+        ? { id: 4, active: true, url: contextA.canonicalUrl }
+        : secondTab.promise),
+      summaryCache: {
+        get: vi.fn(async () => null),
+        set: vi.fn(async (_key, _summary, _token, isCurrent) => {
+          expect(fixture.controller.status(4)).toMatchObject({ state: "complete" });
+          current = isCurrent;
+          return commit.promise;
+        }),
+        writeToken: vi.fn(() => 0),
+        clear: vi.fn(async () => undefined)
+      }
+    });
+    const startA = fixture.controller.start({
+      requestId: "complete-a",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    });
+    await vi.waitFor(() => expect(fixture.dependencies.summaryCache.set).toHaveBeenCalledOnce());
+    const startB = fixture.controller.start({
+      requestId: "reserved-b",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    });
+    await vi.waitFor(() => expect(fixture.dependencies.getTab).toHaveBeenCalledTimes(2));
+    expect(current()).toBe(false);
+    commit.resolve(false);
+    await expect(startA).resolves.toMatchObject({ state: "complete", requestId: "complete-a" });
+    expect(fixture.events).not.toContainEqual(expect.objectContaining({
+      type: "job/complete",
+      requestId: "complete-a"
+    }));
+
+    secondTab.resolve({ id: 4, active: true, url: contextA.canonicalUrl });
+    await expect(startB).resolves.toMatchObject({ state: "complete", requestId: "reserved-b" });
+  });
+
+  it("treats cache storage rejection as nonfatal after validated completion", async () => {
+    let fixture!: ReturnType<typeof setup>;
+    fixture = setup({
+      summaryCache: {
+        get: vi.fn(async () => null),
+        set: vi.fn(async () => {
+          expect(fixture.controller.status(4)?.state).toBe("complete");
+          throw new Error("synthetic cache storage failure");
+        }),
+        writeToken: vi.fn(() => 0),
+        clear: vi.fn(async () => undefined)
+      }
+    });
+
+    await expect(fixture.controller.start({
+      requestId: "cache-reject",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    })).resolves.toMatchObject({ state: "complete" });
+    expect(fixture.events).toContainEqual(expect.objectContaining({
+      type: "job/complete",
+      requestId: "cache-reject"
+    }));
+  });
+
+  it("clear during provider work prevents caching but still emits validated completion", async () => {
+    const pipeline = deferred<VideoSummary>();
+    let generation = 0;
+    let fixture!: ReturnType<typeof setup>;
+    fixture = setup({
+      runPipeline: vi.fn(async () => pipeline.promise),
+      summaryCache: {
+        get: vi.fn(async () => null),
+        set: vi.fn(async (_key, _summary, token) => {
+          expect(fixture.controller.status(4)?.state).toBe("complete");
+          return token === generation;
+        }),
+        writeToken: vi.fn(() => generation),
+        clear: vi.fn(async () => { generation++; })
+      }
+    });
+    const start = fixture.controller.start({
+      requestId: "clear-race",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    });
+    await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce());
+    await fixture.controller.clearSummaryCache();
+    pipeline.resolve(summary);
+
+    await expect(start).resolves.toMatchObject({ state: "complete" });
+    expect(fixture.events).toContainEqual(expect.objectContaining({
+      type: "job/complete",
+      requestId: "clear-race"
+    }));
+  });
+
   it("returns a cache hit after transcript selection without constructing a provider", async () => {
     const cached = { result: summary, createdAt: "2026-07-14T01:00:00.000Z" };
     const fixture = setup({
@@ -109,7 +329,7 @@ describe("SummaryController", () => {
       }
     });
 
-    await expect(fixture.controller.start({ requestId: "cached", tabId: 4, force: false }))
+    await expect(fixture.controller.start({ requestId: "cached", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({
         state: "complete",
         result: {
@@ -130,7 +350,7 @@ describe("SummaryController", () => {
   it("force bypasses cache reads but writes a current validated success", async () => {
     const fixture = setup();
 
-    await expect(fixture.controller.start({ requestId: "forced", tabId: 4, force: true }))
+    await expect(fixture.controller.start({ requestId: "forced", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: true }))
       .resolves.toMatchObject({ state: "complete", result: { cache: null } });
     expect(fixture.dependencies.summaryCache?.get).not.toHaveBeenCalled();
     expect(fixture.dependencies.summaryCache?.writeToken).toHaveBeenCalledBefore(
@@ -154,7 +374,7 @@ describe("SummaryController", () => {
         clear: vi.fn(async () => undefined)
       }
     });
-    const start = fixture.controller.start({ requestId: "cache-read", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "cache-read", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.summaryCache?.get).toHaveBeenCalledOnce());
 
     await fixture.controller.cancel(4, "cache-read");
@@ -175,9 +395,9 @@ describe("SummaryController", () => {
         clear: vi.fn(async () => undefined)
       }
     });
-    const startA = fixture.controller.start({ requestId: "cache-a", tabId: 4, force: false });
+    const startA = fixture.controller.start({ requestId: "cache-a", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.summaryCache?.get).toHaveBeenCalledOnce());
-    const startB = fixture.controller.start({ requestId: "cache-b", tabId: 4, force: true });
+    const startB = fixture.controller.start({ requestId: "cache-b", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: true });
     await expect(startB).resolves.toMatchObject({ requestId: "cache-b", state: "complete" });
     hit.resolve({ result: summary, createdAt: "2026-07-14T01:00:00.000Z" });
     await expect(startA).resolves.toMatchObject({ requestId: "cache-b", state: "complete" });
@@ -199,7 +419,7 @@ describe("SummaryController", () => {
         clear: vi.fn(async () => undefined)
       }
     });
-    const start = fixture.controller.start({ requestId: "cache-write", tabId: 4, force: true });
+    const start = fixture.controller.start({ requestId: "cache-write", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: true });
     await vi.waitFor(() => expect(fixture.dependencies.summaryCache?.set).toHaveBeenCalledOnce());
     await fixture.controller.navigated(4, "bbbbbbbbbbb");
     expect(stillCurrent()).toBe(false);
@@ -213,13 +433,13 @@ describe("SummaryController", () => {
     const unsupported = setup({
       getTab: vi.fn(async (tabId) => ({ id: tabId, url: "https://www.youtube.com/" }))
     });
-    await expect(unsupported.controller.start({ requestId: "unsupported", tabId: 4, force: false }))
+    await expect(unsupported.controller.start({ requestId: "unsupported", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({ state: "error", error: { code: "unsupported_page" } });
     expect(unsupported.dependencies.readVideoContext).not.toHaveBeenCalled();
     expect(unsupported.dependencies.createProvider).not.toHaveBeenCalled();
 
     const missing = setup({ loadSettings: vi.fn(async () => DEFAULT_SETTINGS) });
-    await expect(missing.controller.start({ requestId: "missing", tabId: 4, force: false }))
+    await expect(missing.controller.start({ requestId: "missing", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({ state: "error", error: { code: "configuration_missing" } });
     expect(missing.dependencies.createProvider).not.toHaveBeenCalled();
 
@@ -233,7 +453,7 @@ describe("SummaryController", () => {
         });
       })
     });
-    await expect(captions.controller.start({ requestId: "captions", tabId: 4, force: false }))
+    await expect(captions.controller.start({ requestId: "captions", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({ state: "error", error: { code: "captions_unavailable" } });
     expect(captions.dependencies.createProvider).not.toHaveBeenCalled();
   });
@@ -242,7 +462,7 @@ describe("SummaryController", () => {
     const fixture = setup({
       getTab: vi.fn(async (tabId) => ({ id: tabId, active: false, url: contextA.canonicalUrl }))
     });
-    await expect(fixture.controller.start({ requestId: "inactive", tabId: 4, force: false }))
+    await expect(fixture.controller.start({ requestId: "inactive", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({ state: "error", error: { code: "unsupported_page" } });
     expect(fixture.dependencies.readVideoContext).not.toHaveBeenCalled();
     expect(fixture.dependencies.createProvider).not.toHaveBeenCalled();
@@ -258,7 +478,7 @@ describe("SummaryController", () => {
       })
     });
 
-    const start = fixture.controller.start({ requestId: "cancel-me", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "cancel-me", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.extractTranscript).toHaveBeenCalledOnce());
     await fixture.controller.cancel(4, "cancel-me");
     expect(extractionSignal.aborted).toBe(true);
@@ -285,9 +505,9 @@ describe("SummaryController", () => {
       })
     });
 
-    const startA = fixture.controller.start({ requestId: "request-a", tabId: 4, force: false });
+    const startA = fixture.controller.start({ requestId: "request-a", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.readVideoContext).toHaveBeenCalledTimes(1));
-    const startB = fixture.controller.start({ requestId: "request-b", tabId: 4, force: true });
+    const startB = fixture.controller.start({ requestId: "request-b", tabId: 4, expectedVideoId: "bbbbbbbbbbb", force: true });
     await expect(startB).resolves.toMatchObject({
       requestId: "request-b",
       videoId: "bbbbbbbbbbb",
@@ -321,9 +541,9 @@ describe("SummaryController", () => {
       })
     });
 
-    const startA = fixture.controller.start({ requestId: "request-a", tabId: 4, force: false });
+    const startA = fixture.controller.start({ requestId: "request-a", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledTimes(1));
-    const startB = fixture.controller.start({ requestId: "request-b", tabId: 4, force: true });
+    const startB = fixture.controller.start({ requestId: "request-b", tabId: 4, expectedVideoId: "bbbbbbbbbbb", force: true });
     await expect(startB).resolves.toMatchObject({ requestId: "request-b", state: "complete" });
     pipelineA.resolve(summary);
     await startA;
@@ -337,7 +557,7 @@ describe("SummaryController", () => {
   it("cancels immediately while tab preflight is unresolved", async () => {
     const tab = deferred<{ id: number; active: boolean; url: string }>();
     const fixture = setup({ getTab: vi.fn(async () => tab.promise) });
-    const start = fixture.controller.start({ requestId: "preflight", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "preflight", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.getTab).toHaveBeenCalledOnce());
 
     await expect(fixture.controller.cancel(4, "preflight")).resolves.toMatchObject({ state: "canceled" });
@@ -350,7 +570,7 @@ describe("SummaryController", () => {
   it("does not cancel a same-video navigation and invalidates a completed result after another video", async () => {
     const context = deferred<VideoContext | null>();
     const fixture = setup({ readVideoContext: vi.fn(async () => context.promise) });
-    const start = fixture.controller.start({ requestId: "same-video", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "same-video", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.readVideoContext).toHaveBeenCalledOnce());
 
     await fixture.controller.navigated(4, "aaaaaaaaaaa");
@@ -366,7 +586,7 @@ describe("SummaryController", () => {
   it("rapid A-B-A navigation invalidates A without fabricating replacement work", async () => {
     const pipeline = deferred<VideoSummary>();
     const fixture = setup({ runPipeline: vi.fn(async () => pipeline.promise) });
-    const start = fixture.controller.start({ requestId: "a-one", tabId: 4, force: true });
+    const start = fixture.controller.start({ requestId: "a-one", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: true });
     await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce());
 
     await fixture.controller.navigated(4, "bbbbbbbbbbb");
@@ -381,7 +601,7 @@ describe("SummaryController", () => {
 
   it("stores and emits the same validated completion payload", async () => {
     const fixture = setup();
-    const completed = await fixture.controller.start({ requestId: "request-a", tabId: 4, force: false });
+    const completed = await fixture.controller.start({ requestId: "request-a", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     const event = fixture.events.find((candidate) =>
       (candidate as { type?: string }).type === "job/complete") as { result: unknown };
 
@@ -401,7 +621,7 @@ describe("SummaryController", () => {
       })
     });
 
-    await expect(fixture.controller.start({ requestId: "long-job", tabId: 4, force: false }))
+    await expect(fixture.controller.start({ requestId: "long-job", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({
         state: "complete",
         progress: { phase: "synthesizing", completed: 4, total: 4 }
@@ -425,7 +645,7 @@ describe("SummaryController", () => {
         return pipeline.promise;
       })
     });
-    const start = fixture.controller.start({ requestId: "cancel-map", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "cancel-map", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce());
 
     await expect(fixture.controller.cancel(4, "cancel-map")).resolves.toMatchObject({ state: "canceled" });
@@ -438,7 +658,7 @@ describe("SummaryController", () => {
   it("cancels active synthesis after navigation and never exposes its late result", async () => {
     const pipeline = deferred<VideoSummary>();
     const fixture = setup({ runPipeline: vi.fn(async () => pipeline.promise) });
-    const start = fixture.controller.start({ requestId: "navigate-map", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "navigate-map", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce());
 
     await fixture.controller.navigated(4, "bbbbbbbbbbb");
@@ -453,7 +673,7 @@ describe("SummaryController", () => {
       readVideoContext: vi.fn(async () => ({ ...contextA, title: "bad\u0000title" }))
     });
 
-    await expect(fixture.controller.start({ requestId: "invalid", tabId: 4, force: false }))
+    await expect(fixture.controller.start({ requestId: "invalid", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({ state: "error", error: { code: "internal_error" } });
     expect(fixture.controller.status(4)).not.toHaveProperty("result");
     expect(fixture.events).not.toContainEqual(expect.objectContaining({ type: "job/complete" }));
@@ -467,7 +687,7 @@ describe("SummaryController", () => {
         throw new Error("Receiving end does not exist");
       })
     });
-    const start = fixture.controller.start({ requestId: "navigate-away", tabId: 4, force: false });
+    const start = fixture.controller.start({ requestId: "navigate-away", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.extractTranscript).toHaveBeenCalledOnce());
 
     await expect(fixture.controller.navigated(4, "bbbbbbbbbbb")).resolves.toBeUndefined();

@@ -226,11 +226,23 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       type: "panel/start",
       requestId,
       tabId,
+      expectedVideoId: videoId,
       force
     }).catch(() => null));
     if (!mountedRef.current) return;
     if (requestIdRef.current !== requestId || stateVersionRef.current !== requestVersion) return;
-    if (response !== null) acceptSnapshot(response, requestVersion);
+    if (response !== null) {
+      acceptSnapshot(response, requestVersion);
+    } else {
+      acceptSnapshot({
+        requestId,
+        tabId,
+        videoId,
+        state: "canceled",
+        progress: null,
+        startedAt: Date.now()
+      }, requestVersion);
+    }
   }
 
   function applyEvent(event: BackgroundEvent): boolean {

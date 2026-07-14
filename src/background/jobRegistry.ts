@@ -151,6 +151,14 @@ export class JobRegistry {
     return current !== undefined && sameIdentity(current, candidate);
   }
 
+  isComplete(candidate: JobIdentity): boolean {
+    const current = this.#jobs.get(candidate.tabId);
+    return current !== undefined
+      && sameIdentity(current, candidate)
+      && current.state === "complete"
+      && !current.controller.signal.aborted;
+  }
+
   transition(candidate: JobIdentity, state: ActiveState): boolean {
     const current = this.#jobs.get(candidate.tabId);
     if (current === undefined || !sameIdentity(current, candidate)

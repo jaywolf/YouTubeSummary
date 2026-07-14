@@ -62,6 +62,7 @@ export type SummaryControllerDependencies = {
 export type StartSummaryRequest = {
   requestId: string;
   tabId: number;
+  expectedVideoId: string;
   force: boolean;
 };
 
@@ -69,7 +70,7 @@ type StartReservation = {
   requestId: string;
   token: symbol;
   startedAt: number;
-  videoId?: string;
+  videoId: string;
 };
 
 function appError(code: SafeAppError["code"], safeMessage: string): AppError {
@@ -133,7 +134,8 @@ export class SummaryController {
     const reservation = {
       requestId: request.requestId,
       token: Symbol(request.requestId),
-      startedAt: (this.dependencies.now ?? Date.now)()
+      startedAt: (this.dependencies.now ?? Date.now)(),
+      videoId: request.expectedVideoId
     };
     const current = this.#registry.status(request.tabId);
     this.#reservations.set(request.tabId, reservation);
@@ -147,6 +149,10 @@ export class SummaryController {
 
   #isReserved(tabId: number, reservation: StartReservation): boolean {
     return this.#reservations.get(tabId)?.token === reservation.token;
+  }
+
+  #ownsCompleted(job: JobIdentity): boolean {
+    return !this.#reservations.has(job.tabId) && this.#registry.isComplete(job);
   }
 
   #preflightFailure(
@@ -173,6 +179,25 @@ export class SummaryController {
       tabId: request.tabId,
       error: snapshot.error
     });
+    return snapshot;
+  }
+
+  #preflightCanceled(
+    request: StartSummaryRequest,
+    reservation: StartReservation
+  ): JobSnapshot | null {
+    if (!this.#isReserved(request.tabId, reservation)) return this.status(request.tabId);
+    const snapshot: JobSnapshot = {
+      requestId: request.requestId,
+      tabId: request.tabId,
+      videoId: request.expectedVideoId,
+      state: "canceled",
+      progress: null,
+      startedAt: reservation.startedAt
+    };
+    this.#reservations.delete(request.tabId);
+    this.#preflight.set(request.tabId, snapshot);
+    this.#emitState(snapshot, "canceled");
     return snapshot;
   }
 
@@ -218,7 +243,9 @@ export class SummaryController {
           appError("unsupported_page", "Open a standard YouTube video page to create a summary.")
         );
       }
-      reservation.videoId = identity.videoId;
+      if (identity.videoId !== request.expectedVideoId) {
+        return this.#preflightCanceled(request, reservation);
+      }
 
       const readContext = await this.dependencies.readVideoContext(request.tabId);
       if (!this.#isReserved(request.tabId, reservation)) return this.status(request.tabId);
@@ -311,6 +338,7 @@ export class SummaryController {
             });
             if (!this.#registry.complete(job, cachedResult)) return this.status(request.tabId);
             await this.#registry.settled();
+            if (!this.#ownsCompleted(job)) return this.status(request.tabId);
             const snapshot = this.#registry.status(request.tabId);
             if (snapshot?.state !== "complete" || snapshot.requestId !== job.requestId) return snapshot;
             this.dependencies.emit({
@@ -359,17 +387,22 @@ export class SummaryController {
         summary,
         cache: null
       });
-      if (cacheKey !== null && cacheWriteToken !== null) {
-        await this.dependencies.summaryCache.set(
-          cacheKey,
-          result.summary,
-          cacheWriteToken,
-          () => !job.signal.aborted && this.#registry.isCurrent(job)
-        );
-        if (job.signal.aborted || !this.#registry.isCurrent(job)) return this.status(request.tabId);
-      }
       if (!this.#registry.complete(job, result)) return this.status(request.tabId);
       await this.#registry.settled();
+      if (!this.#ownsCompleted(job)) return this.status(request.tabId);
+      if (cacheKey !== null && cacheWriteToken !== null) {
+        try {
+          await this.dependencies.summaryCache.set(
+            cacheKey,
+            result.summary,
+            cacheWriteToken,
+            () => this.#ownsCompleted(job)
+          );
+        } catch {
+          // A validated completion remains usable when the optional cache is unavailable.
+        }
+        if (!this.#ownsCompleted(job)) return this.status(request.tabId);
+      }
       const snapshot = this.#registry.status(request.tabId);
       if (snapshot?.state !== "complete" || snapshot.requestId !== job.requestId) return snapshot;
       this.dependencies.emit({
@@ -419,7 +452,7 @@ export class SummaryController {
     const reservation = this.#reservations.get(tabId);
     const current = this.status(tabId);
     if (reservation !== undefined
-        && (reservation.videoId === undefined || videoId === null || reservation.videoId !== videoId)) {
+        && (videoId === null || reservation.videoId !== videoId)) {
       await this.cancel(tabId, reservation.requestId);
       this.#preflight.delete(tabId);
       this.#registry.invalidate(tabId, reservation.requestId);

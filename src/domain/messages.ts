@@ -10,7 +10,12 @@ import {
 const base = { requestId: z.string().min(1), tabId: z.number().int().nonnegative() };
 
 export const appMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("panel/start"), ...base, force: z.boolean() }),
+  z.object({
+    type: z.literal("panel/start"),
+    ...base,
+    expectedVideoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+    force: z.boolean()
+  }),
   z.object({ type: z.literal("panel/cancel"), ...base }),
   z.object({ type: z.literal("panel/status"), ...base }),
   z.object({

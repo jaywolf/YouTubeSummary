@@ -122,8 +122,18 @@ describe("side panel", () => {
       type: "panel/start",
       requestId: "auto-start",
       tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
       force: false
     });
+  });
+
+  it("does not strand loading when the current start response is null", async () => {
+    const fixture = setup(null);
+    fixture.client.sendRuntimeMessage = vi.fn(async () => null);
+    render(<App client={fixture.client} />);
+
+    expect(await screen.findByText("Summary canceled")).toBeTruthy();
+    expect(screen.queryByText("Reading the current video")).toBeNull();
   });
 
   it("renders unsupported and configuration-required states with the right action", async () => {
@@ -322,6 +332,7 @@ describe("side panel", () => {
       type: "panel/start",
       requestId: "auto-start",
       tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
       force: true
     });
   });
@@ -406,7 +417,8 @@ describe("side panel", () => {
     expect(fixture.sendRuntimeMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: "panel/start",
       force: false,
-      tabId: 4
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa"
     }));
   });
 

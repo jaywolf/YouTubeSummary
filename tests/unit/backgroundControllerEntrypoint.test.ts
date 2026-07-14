@@ -118,7 +118,7 @@ describe("background controller entrypoint", () => {
     const listener = module.createBackgroundMessageListener(controller as never);
     const sendResponse = vi.fn();
 
-    const returned = listener({ type: "panel/start", requestId: "start", tabId: 4, force: false }, {}, sendResponse);
+    const returned = listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, {}, sendResponse);
     expect(returned).toBe(true);
     expect(returned).not.toBeInstanceOf(Promise);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith(snapshot));
@@ -137,7 +137,7 @@ describe("background controller entrypoint", () => {
     const listener = module.createBackgroundMessageListener(controller as never, ready);
     const sendResponse = vi.fn();
 
-    expect(listener({ type: "panel/start", requestId: "start", tabId: 4, force: false }, {}, sendResponse))
+    expect(listener({ type: "panel/start", requestId: "start", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }, {}, sendResponse))
       .toBe(true);
     expect(controller.start).not.toHaveBeenCalled();
     markReady();

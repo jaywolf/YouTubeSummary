@@ -28,8 +28,18 @@ describe("parseAppMessage", () => {
       type: "panel/start",
       requestId: "request-1",
       tabId: 7,
+      expectedVideoId: "aaaaaaaaaaa",
       force: false
     }).type).toBe("panel/start");
+  });
+
+  it("requires the expected video identity on panel start", () => {
+    expect(() => parseAppMessage({
+      type: "panel/start",
+      requestId: "request-1",
+      tabId: 7,
+      force: false
+    })).toThrow();
   });
 
   it("rejects a message without a request identifier", () => {

@@ -94,6 +94,14 @@ export class ActiveJobStore {
     return result;
   }
 
+  async #set(items: Record<string, unknown>): Promise<void> {
+    try {
+      await this.storage.set(items);
+    } catch {
+      await this.storage.set(items);
+    }
+  }
+
   async #load(): Promise<{ jobs: PersistedJobSnapshot[]; corrupt: boolean }> {
     const stored = await this.storage.get(ACTIVE_JOBS_STORAGE_KEY);
     if (!(ACTIVE_JOBS_STORAGE_KEY in stored)) return { jobs: [], corrupt: false };
@@ -110,7 +118,7 @@ export class ActiveJobStore {
       const loaded = await this.#load();
       const jobs = loaded.jobs.filter((job) => job.tabId !== parsed.data.tabId);
       jobs.push(parsed.data);
-      await this.storage.set({ [ACTIVE_JOBS_STORAGE_KEY]: { version: 1, jobs } });
+      await this.#set({ [ACTIVE_JOBS_STORAGE_KEY]: { version: 1, jobs } });
     });
   }
 
@@ -122,7 +130,7 @@ export class ActiveJobStore {
         || job.requestId !== identity.requestId
         || job.videoId !== identity.videoId);
       if (loaded.corrupt || jobs.length !== loaded.jobs.length) {
-        await this.storage.set({ [ACTIVE_JOBS_STORAGE_KEY]: { version: 1, jobs } });
+        await this.#set({ [ACTIVE_JOBS_STORAGE_KEY]: { version: 1, jobs } });
       }
     });
   }
@@ -133,7 +141,7 @@ export class ActiveJobStore {
       const interrupted = loaded.jobs
         .filter((job) => ACTIVE_JOB_STATES.has(job.state))
         .map((job) => ({ ...job, state: "interrupted" as const }));
-      await this.storage.set({ [ACTIVE_JOBS_STORAGE_KEY]: EMPTY_ACTIVE_JOBS });
+      await this.#set({ [ACTIVE_JOBS_STORAGE_KEY]: EMPTY_ACTIVE_JOBS });
       return interrupted;
     });
   }
