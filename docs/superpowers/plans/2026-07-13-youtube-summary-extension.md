@@ -1181,7 +1181,7 @@ Expected: complete cached, navigation, interruption, and error behavior is indep
 
 **Interfaces:**
 - Produces: deterministic WXT_TEST_MODE build and Playwright extension fixture.
-- Consumes: built dist/chrome-mv3 package and all completed extension behavior.
+- Consumes: built test-mode dist-test/chrome-mv3 package and all completed extension behavior.
 
 - [ ] **Step 1: Configure a persistent Chromium extension fixture**
 
