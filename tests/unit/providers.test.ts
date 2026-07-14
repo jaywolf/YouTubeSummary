@@ -68,8 +68,20 @@ describe("OpenAI Responses provider", () => {
     };
     visit(jsonSchema);
 
-    const takeaways = (jsonSchema.properties as Record<string, any>).takeaways;
-    const startSeconds = takeaways.items.properties.startSeconds;
+    const objectValue = (value: unknown): Record<string, unknown> => {
+      expect(value).toBeTruthy();
+      expect(typeof value).toBe("object");
+      expect(Array.isArray(value)).toBe(false);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("Expected an object schema node");
+      }
+      return value as Record<string, unknown>;
+    };
+    const rootProperties = objectValue(jsonSchema.properties);
+    const takeaways = objectValue(rootProperties.takeaways);
+    const items = objectValue(takeaways.items);
+    const itemProperties = objectValue(items.properties);
+    const startSeconds = objectValue(itemProperties.startSeconds);
     expect(startSeconds.anyOf).toContainEqual({ type: "null" });
   });
 
