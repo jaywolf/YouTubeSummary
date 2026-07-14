@@ -430,6 +430,46 @@ describe("provider failure policy", () => {
     expect(sleep).toHaveBeenCalledWith(0, expect.any(AbortSignal));
   });
 
+  it("treats a malformed Retry-After value as an absent delay for the single retry", async () => {
+    expect(parseRetryAfter("retry shortly")).toBeUndefined();
+    const sleep = vi.fn(async () => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("", {
+        status: 429,
+        headers: { "Retry-After": "retry shortly" }
+      }))
+      .mockResolvedValueOnce(openAiSuccess());
+    const provider = createProvider(
+      { kind: "openai", apiKey: "synthetic", model: "test" },
+      fetchMock as typeof fetch,
+      { sleep }
+    );
+
+    await expect(provider.generate(request, () => undefined, signal())).resolves.toEqual(summaryContent);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(0, expect.any(AbortSignal));
+  });
+
+  it.each([
+    ["OpenAI Responses", () => openAiSuccess],
+    ["Chat Completions", () => chatSuccess]
+  ])("does not classify benign safety or refusal prose as filtered for %s", async (_label, responseFactory) => {
+    const benign = {
+      ...summaryContent,
+      overview: ["The speaker explains a workplace safety plan and a polite refusal procedure."]
+    };
+    const response = responseFactory();
+    const config: ProviderConfig = _label === "OpenAI Responses"
+      ? { kind: "openai", apiKey: "synthetic", model: "test" }
+      : { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" };
+    const provider = createProvider(
+      config,
+      vi.fn(async () => response(JSON.stringify(benign))) as typeof fetch
+    );
+
+    await expect(provider.generate(request, () => undefined, signal())).resolves.toEqual(benign);
+  });
+
   it("honors Retry-After through 60 seconds and does not wait above the ceiling", async () => {
     const sleep = vi.fn(async () => undefined);
     const retryingFetch = vi.fn()
