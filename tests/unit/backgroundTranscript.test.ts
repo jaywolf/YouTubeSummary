@@ -45,6 +45,9 @@ describe("background transcript bridge", () => {
       scripting: { executeScript },
       tabs: { sendMessage },
       runtime: {
+        id: "extension-id",
+        onMessage: { addListener: vi.fn() },
+        onConnect: { addListener: vi.fn() },
         onInstalled: {
           addListener: vi.fn((listener: () => unknown) => {
             installedListener = listener;

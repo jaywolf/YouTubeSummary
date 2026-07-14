@@ -89,6 +89,45 @@ describe("YouTube content runtime messages", () => {
     });
   });
 
+  it("consumes a bounded cancel-before-extract tombstone without starting extraction", async () => {
+    const extract = vi.fn(async () => transcript);
+    const handler = createYouTubeMessageHandler({
+      extract,
+      fetchText: vi.fn(),
+      readVisibleSegments: vi.fn(),
+      findVideo: () => null
+    });
+
+    await handler({ type: "youtube/cancel-extract", requestId: "extract-1", tabId: 7 });
+    await expect(handler(extractMessage)).resolves.toMatchObject({
+      code: "request_canceled",
+      retryable: false
+    });
+    expect(extract).not.toHaveBeenCalled();
+
+    await expect(handler(extractMessage)).resolves.toEqual(transcript);
+    expect(extract).toHaveBeenCalledOnce();
+  });
+
+  it("bounds cancel-before-extract tombstones", async () => {
+    const extract = vi.fn(async () => transcript);
+    const handler = createYouTubeMessageHandler({
+      extract,
+      fetchText: vi.fn(),
+      readVisibleSegments: vi.fn(),
+      findVideo: () => null
+    });
+    for (let index = 0; index < 129; index++) {
+      await handler({ type: "youtube/cancel-extract", requestId: `cancel-${index}`, tabId: 7 });
+    }
+
+    await expect(handler({ ...extractMessage, requestId: "cancel-0" })).resolves.toEqual(transcript);
+    await expect(handler({ ...extractMessage, requestId: "cancel-128" })).resolves.toMatchObject({
+      code: "request_canceled"
+    });
+    expect(extract).toHaveBeenCalledOnce();
+  });
+
   it("seeks without forcing a paused video to play", async () => {
     const video = document.createElement("video");
     const play = vi.spyOn(video, "play");

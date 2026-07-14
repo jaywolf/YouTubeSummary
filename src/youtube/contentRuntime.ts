@@ -52,6 +52,15 @@ export function createYouTubeMessageHandler(
   dependencies: YouTubeContentDependencies,
   controllers: Map<string, AbortController> = new Map()
 ): YouTubeMessageHandler {
+  const canceledBeforeStart = new Set<string>();
+  const rememberCancellation = (requestId: string) => {
+    canceledBeforeStart.add(requestId);
+    if (canceledBeforeStart.size > 128) {
+      const oldest = canceledBeforeStart.values().next().value;
+      if (oldest !== undefined) canceledBeforeStart.delete(oldest);
+    }
+  };
+
   return async (value) => {
     let message: AppMessage;
     try {
@@ -61,7 +70,9 @@ export function createYouTubeMessageHandler(
     }
 
     if (message.type === "youtube/cancel-extract") {
-      controllers.get(message.requestId)?.abort();
+      const active = controllers.get(message.requestId);
+      if (active === undefined) rememberCancellation(message.requestId);
+      active?.abort();
       controllers.delete(message.requestId);
       return undefined;
     }
@@ -73,6 +84,8 @@ export function createYouTubeMessageHandler(
     }
 
     if (message.type !== "youtube/extract") return undefined;
+
+    if (canceledBeforeStart.delete(message.requestId)) return canceledResponse();
 
     controllers.get(message.requestId)?.abort();
     const controller = new AbortController();
