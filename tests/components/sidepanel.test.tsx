@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App, type PanelClient, type PanelPort } from "../../entrypoints/sidepanel/App";
@@ -33,6 +33,16 @@ const complete: JobSnapshot = {
   startedAt: 1,
   result
 };
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
 
 function fakePort() {
   const listeners = new Set<(event: BackgroundEvent) => void>();
@@ -387,6 +397,70 @@ describe("side panel", () => {
     await vi.waitFor(() => expect(fixture.client.writeClipboard).toHaveBeenCalledOnce());
     expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+  });
+
+  it("clears copied acknowledgement for regeneration until the new summary is copied", async () => {
+    const fixture = setup(complete);
+    render(<App client={fixture.client} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+    await screen.findByText("Creating your summary");
+    fixture.port.emit({ type: "job/complete", requestId: "auto-start", tabId: 4, result });
+    expect(await screen.findByRole("button", { name: "Copy" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+  });
+
+  it("keeps the latest successful copy acknowledged when an older attempt rejects", async () => {
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    const fixture = setup(complete);
+    fixture.client.writeClipboard = vi.fn()
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+    render(<App client={fixture.client} />);
+    const copy = await screen.findByRole("button", { name: "Copy" });
+    await userEvent.click(copy);
+    await userEvent.click(copy);
+
+    await act(async () => newer.resolve());
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    await act(async () => older.reject(new Error("older rejection")));
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+  });
+
+  it("does not let an older fulfillment override a newer failed copy attempt", async () => {
+    const older = deferred<void>();
+    const fixture = setup(complete);
+    fixture.client.writeClipboard = vi.fn()
+      .mockImplementationOnce(() => older.promise)
+      .mockRejectedValueOnce(new Error("newer rejection"));
+    render(<App client={fixture.client} />);
+    const copy = await screen.findByRole("button", { name: "Copy" });
+    await userEvent.click(copy);
+    await userEvent.click(copy);
+    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+
+    await act(async () => older.resolve());
+    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+  });
+
+  it("does not let a copy fulfillment from the old request acknowledge a new summary", async () => {
+    const oldCopy = deferred<void>();
+    const fixture = setup(complete);
+    fixture.client.writeClipboard = vi.fn(() => oldCopy.promise);
+    render(<App client={fixture.client} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    await userEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+    await screen.findByText("Creating your summary");
+    fixture.port.emit({ type: "job/complete", requestId: "auto-start", tabId: 4, result });
+    expect(await screen.findByRole("button", { name: "Copy" })).toBeTruthy();
+
+    await act(async () => oldCopy.resolve());
+    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
   });
 
   it("seeks only the tab that still displays the result video", async () => {

@@ -155,7 +155,7 @@ function phaseLabel(state: JobState): string {
 export function App({ client = browserClient }: { client?: PanelClient }) {
   const [snapshot, setSnapshot] = useState<JobSnapshot | null>(null);
   const [booting, setBooting] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [copiedRequestId, setCopiedRequestId] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const mountedRef = useRef(false);
   const tabIdRef = useRef<number | null>(null);
@@ -164,6 +164,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   const stateVersionRef = useRef(0);
   const statusPendingRef = useRef(false);
   const pendingTerminalEventsRef = useRef<BackgroundEvent[]>([]);
+  const copyAttemptRef = useRef(0);
 
   function acceptSnapshot(candidate: JobSnapshot, expectedVersion?: number): boolean {
     if (!mountedRef.current) return false;
@@ -182,6 +183,8 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
     const videoId = videoIdRef.current;
     if (tabId === null || videoId === null) return;
     const requestId = client.createRequestId();
+    copyAttemptRef.current++;
+    setCopiedRequestId(null);
     requestIdRef.current = requestId;
     stateVersionRef.current++;
     const requestVersion = stateVersionRef.current;
@@ -347,12 +350,19 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   }
 
   async function copyResult(result: CompletedSummaryPayload, requestId: string) {
-    setCopied(false);
+    const attempt = ++copyAttemptRef.current;
+    setCopiedRequestId(null);
     try {
       await client.writeClipboard(copyText(result));
-      if (mountedRef.current && requestIdRef.current === requestId) setCopied(true);
+      if (mountedRef.current && copyAttemptRef.current === attempt
+          && requestIdRef.current === requestId) {
+        setCopiedRequestId(requestId);
+      }
     } catch {
-      if (mountedRef.current) setCopied(false);
+      if (mountedRef.current && copyAttemptRef.current === attempt
+          && requestIdRef.current === requestId) {
+        setCopiedRequestId(null);
+      }
     }
   }
 
@@ -429,7 +439,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
 
       <div className="summary-actions">
         <button onClick={() => void copyResult(result, snapshot.requestId)}>
-          {copied ? "Copied" : "Copy"}
+          {copiedRequestId === snapshot.requestId ? "Copied" : "Copy"}
         </button>
         <button onClick={() => void start(true)}>Regenerate</button>
         <button onClick={() => void client.openOptionsPage()}>Settings</button>
