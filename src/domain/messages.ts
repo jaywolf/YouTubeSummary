@@ -40,9 +40,17 @@ export type JobState =
   | "canceled"
   | "interrupted";
 
+export type PipelinePhase = "mapping" | "reducing" | "synthesizing";
+
+export type PipelineProgress = {
+  phase: PipelinePhase;
+  completed: number;
+  total: number;
+};
+
 export type BackgroundEvent =
   | { type: "job/state"; requestId: string; tabId: number; state: JobState }
-  | { type: "job/progress"; requestId: string; tabId: number; completed: number; total: number }
+  | ({ type: "job/progress"; requestId: string; tabId: number } & PipelineProgress)
   | {
       type: "job/complete";
       requestId: string;

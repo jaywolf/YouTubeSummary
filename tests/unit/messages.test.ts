@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { parseAppMessage, parseTranscriptResponse } from "../../src/domain/messages";
+import {
+  parseAppMessage,
+  parseTranscriptResponse,
+  type BackgroundEvent
+} from "../../src/domain/messages";
+
+describe("background progress serialization", () => {
+  it("round-trips an explicit pipeline phase without intermediate model text", () => {
+    const event = {
+      type: "job/progress",
+      requestId: "request-1",
+      tabId: 7,
+      phase: "reducing",
+      completed: 3,
+      total: 6
+    } satisfies BackgroundEvent;
+
+    expect(JSON.parse(JSON.stringify(event))).toEqual(event);
+    expect(event).not.toHaveProperty("text");
+    expect(event).not.toHaveProperty("summary");
+  });
+});
 
 describe("parseAppMessage", () => {
   it("accepts a typed panel request", () => {

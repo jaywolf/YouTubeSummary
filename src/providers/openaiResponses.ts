@@ -164,6 +164,7 @@ export function createOpenAiResponsesProvider(
   async function repair(
     target: TargetSchema,
     invalidOutput: string,
+    maxOutputTokens: number,
     signal: AbortSignal
   ): Promise<unknown> {
     try {
@@ -171,6 +172,7 @@ export function createOpenAiResponsesProvider(
         model: config.model,
         stream: false,
         store: false,
+        max_output_tokens: maxOutputTokens,
         instructions: "Repair the supplied model output into valid JSON matching the required schema. Return JSON only.",
         input: [
           "BEGIN INVALID MODEL OUTPUT",
@@ -234,6 +236,7 @@ export function createOpenAiResponsesProvider(
           model: config.model,
           stream: true,
           store: false,
+          max_output_tokens: request.maxOutputTokens,
           instructions: request.system,
           input: request.user,
           text: { format: structuredFormat(target) }
@@ -327,7 +330,7 @@ export function createOpenAiResponsesProvider(
         if (request.kind === "repair") {
           throw providerOutputInvalid(error instanceof Error ? error : undefined);
         }
-        return await repair(target, raw, signal);
+        return await repair(target, raw, request.maxOutputTokens, signal);
       }
     }
   };

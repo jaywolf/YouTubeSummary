@@ -9,6 +9,7 @@ export type ProviderRequest = {
   system: string;
   user: string;
   schema: "video-summary" | "chunk-summary";
+  maxOutputTokens: number;
 };
 
 export type ProviderEvent =

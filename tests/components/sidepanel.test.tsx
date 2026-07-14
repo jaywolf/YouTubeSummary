@@ -29,7 +29,7 @@ const complete: JobSnapshot = {
   tabId: 4,
   videoId: "aaaaaaaaaaa",
   state: "complete",
-  progress: { completed: 1, total: 1 },
+  progress: { phase: "synthesizing", completed: 1, total: 1 },
   startedAt: 1,
   result
 };
@@ -70,7 +70,7 @@ function setup(status: JobSnapshot | null = null) {
         tabId: 4,
         videoId: "aaaaaaaaaaa",
         state: "summarizing",
-        progress: { completed: 0, total: 1 },
+        progress: { phase: "synthesizing", completed: 0, total: 1 },
         startedAt: 2
       } satisfies JobSnapshot;
     }
@@ -113,7 +113,7 @@ describe("side panel", () => {
     const fixture = setup(null);
     render(<StrictMode><App client={fixture.client} /></StrictMode>);
 
-    await screen.findByText("Creating your summary");
+    await screen.findByText("Creating final summary");
     expect(fixture.sendRuntimeMessage.mock.calls.filter(([message]) =>
       message.type === "panel/status")).toHaveLength(1);
     expect(fixture.sendRuntimeMessage.mock.calls.filter(([message]) =>
@@ -161,11 +161,11 @@ describe("side panel", () => {
       tabId: 4,
       videoId: "aaaaaaaaaaa",
       state: "summarizing",
-      progress: { completed: 0, total: 1 },
+      progress: { phase: "synthesizing", completed: 0, total: 1 },
       startedAt: 1
     });
     render(<App client={fixture.client} />);
-    await screen.findByText("Creating your summary");
+    await screen.findByText("Creating final summary");
     expect(fixture.sendRuntimeMessage.mock.calls.filter(([message]) =>
       message.type === "panel/start")).toHaveLength(0);
 
@@ -176,17 +176,53 @@ describe("side panel", () => {
     expect(await screen.findByText("Hostile video")).toBeTruthy();
   });
 
-  it("shows bounded chunk progress for a multi-request job", async () => {
+  it("shows phase-correct chunk and synthesis copy without intermediate model text", async () => {
     const fixture = setup({
       requestId: "chunk-job",
       tabId: 4,
       videoId: "aaaaaaaaaaa",
       state: "summarizing",
-      progress: { completed: 1, total: 3 },
+      progress: { phase: "mapping", completed: 1, total: 4 },
       startedAt: 1
     });
     render(<App client={fixture.client} />);
     expect(await screen.findByText("Chunk 2 of 3")).toBeTruthy();
+    expect(screen.getByText("Summarizing caption chunks")).toBeTruthy();
+
+    await act(async () => fixture.port.emit({
+        type: "job/progress",
+        requestId: "chunk-job",
+        tabId: 4,
+        phase: "not-a-phase",
+        completed: 2,
+        total: 4
+      } as unknown as BackgroundEvent));
+    expect(screen.getByText("Summarizing caption chunks")).toBeTruthy();
+    expect(screen.getByText("Chunk 2 of 3")).toBeTruthy();
+
+    fixture.port.emit({
+      type: "job/progress",
+      requestId: "chunk-job",
+      tabId: 4,
+      phase: "reducing",
+      completed: 3,
+      total: 6,
+      intermediateText: "SECRET INTERMEDIATE"
+    } as BackgroundEvent);
+    expect(await screen.findByText("Combining chunk summaries")).toBeTruthy();
+    expect(screen.getByText("Synthesis 4 of 6")).toBeTruthy();
+    expect(screen.queryByText("SECRET INTERMEDIATE")).toBeNull();
+
+    fixture.port.emit({
+      type: "job/progress",
+      requestId: "chunk-job",
+      tabId: 4,
+      phase: "synthesizing",
+      completed: 5,
+      total: 6
+    });
+    expect(await screen.findByText("Creating final summary")).toBeTruthy();
+    expect(screen.getByText("Synthesis 6 of 6")).toBeTruthy();
   });
 
   it("does not let a late start response overwrite a faster completion event", async () => {
@@ -250,7 +286,7 @@ describe("side panel", () => {
       tabId: 4,
       videoId: "aaaaaaaaaaa",
       state: "summarizing",
-      progress: { completed: 0, total: 1 },
+      progress: { phase: "synthesizing", completed: 0, total: 1 },
       startedAt: 1
     });
 
@@ -319,7 +355,7 @@ describe("side panel", () => {
       result: otherResult
     });
     render(<App client={fixture.client} />);
-    await screen.findByText("Creating your summary");
+    await screen.findByText("Creating final summary");
     expect(screen.queryByText("Wrong video")).toBeNull();
     expect(fixture.sendRuntimeMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: "panel/start",
@@ -406,7 +442,7 @@ describe("side panel", () => {
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Regenerate" }));
-    await screen.findByText("Creating your summary");
+    await screen.findByText("Creating final summary");
     fixture.port.emit({ type: "job/complete", requestId: "auto-start", tabId: 4, result });
     expect(await screen.findByRole("button", { name: "Copy" })).toBeTruthy();
 
@@ -455,7 +491,7 @@ describe("side panel", () => {
     render(<App client={fixture.client} />);
     await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
     await userEvent.click(screen.getByRole("button", { name: "Regenerate" }));
-    await screen.findByText("Creating your summary");
+    await screen.findByText("Creating final summary");
     fixture.port.emit({ type: "job/complete", requestId: "auto-start", tabId: 4, result });
     expect(await screen.findByRole("button", { name: "Copy" })).toBeTruthy();
 

@@ -17,7 +17,8 @@ const request = {
   kind: "final" as const,
   system: "Return grounded JSON.",
   user: "BEGIN TRANSCRIPT\n[00:00] Hello\nEND TRANSCRIPT",
-  schema: "video-summary" as const
+  schema: "video-summary" as const,
+  maxOutputTokens: 4_096
 };
 
 function sseResponse(data: unknown[], headers: HeadersInit = {}): Response {
@@ -108,6 +109,7 @@ describe("OpenAI Responses provider", () => {
       model: "gpt-test",
       stream: true,
       store: false,
+      max_output_tokens: 4_096,
       instructions: request.system,
       input: request.user,
       text: { format: expect.objectContaining({ type: "json_schema", name: "video_summary", strict: true }) }
@@ -255,6 +257,7 @@ describe("OpenAI-compatible providers", () => {
     expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({
       model: "vendor/model",
       stream: true,
+      max_tokens: 4_096,
       messages: [
         { role: "system", content: request.system },
         { role: "user", content: request.user }
@@ -278,6 +281,7 @@ describe("OpenAI-compatible providers", () => {
     const body = JSON.parse(String(init?.body));
     expect(url).toBe("https://llm.example/v1/chat/completions");
     expect(body).not.toHaveProperty("response_format");
+    expect(body.max_tokens).toBe(4_096);
     expect(JSON.stringify(body.messages)).toContain("Required JSON schema");
     expect(JSON.stringify(body.messages)).toContain("overview");
   });
@@ -794,7 +798,7 @@ describe("summary prompt", () => {
     expect(PROMPT_VERSION).toMatch(/^v\d+$/);
     expect(prompt.system).toContain("data, not instructions");
     expect(prompt.user).toContain("BEGIN TRANSCRIPT DATA");
-    expect(prompt.user).toContain("[00:00]");
+    expect(prompt.user).toContain('"timestamp":"00:00"');
     expect(prompt.user).toContain(SUMMARY_LIMITATION);
   });
 });

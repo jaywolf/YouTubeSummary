@@ -161,8 +161,20 @@ describe("background controller entrypoint", () => {
     hub.connect(accepted as never);
     hub.connect(ignored as never);
 
-    hub.emit({ type: "job/state", requestId: "job", tabId: 4, state: "summarizing" });
+    hub.emit({
+      type: "job/progress",
+      requestId: "job",
+      tabId: 4,
+      phase: "mapping",
+      completed: 1,
+      total: 4
+    });
     expect(accepted.postMessage).toHaveBeenCalledOnce();
+    expect(accepted.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      phase: "mapping",
+      completed: 1,
+      total: 4
+    }));
     expect(ignored.postMessage).not.toHaveBeenCalled();
     disconnect();
     hub.emit({ type: "job/state", requestId: "job", tabId: 4, state: "complete" });

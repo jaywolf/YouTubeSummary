@@ -254,6 +254,64 @@ describe("SummaryController", () => {
     expect((completed as { result: unknown }).result).toBe(event.result);
   });
 
+  it("forwards phase-bearing progress and stores the actual final progress on completion", async () => {
+    const fixture = setup({
+      runPipeline: vi.fn(async (input) => {
+        input.onProgress({ phase: "mapping", completed: 0, total: 4 });
+        input.onProgress({ phase: "mapping", completed: 3, total: 4 });
+        input.onProgress({ phase: "synthesizing", completed: 3, total: 4 });
+        input.onProgress({ phase: "synthesizing", completed: 4, total: 4 });
+        return summary;
+      })
+    });
+
+    await expect(fixture.controller.start({ requestId: "long-job", tabId: 4, force: false }))
+      .resolves.toMatchObject({
+        state: "complete",
+        progress: { phase: "synthesizing", completed: 4, total: 4 }
+      });
+    expect(fixture.events.filter((event) => (event as { type?: string }).type === "job/progress"))
+      .toEqual([
+        { type: "job/progress", requestId: "long-job", tabId: 4, phase: "mapping", completed: 0, total: 4 },
+        { type: "job/progress", requestId: "long-job", tabId: 4, phase: "mapping", completed: 3, total: 4 },
+        { type: "job/progress", requestId: "long-job", tabId: 4, phase: "synthesizing", completed: 3, total: 4 },
+        { type: "job/progress", requestId: "long-job", tabId: 4, phase: "synthesizing", completed: 4, total: 4 }
+      ]);
+  });
+
+  it("cancels an active mapping pipeline and suppresses its late result", async () => {
+    const pipeline = deferred<VideoSummary>();
+    let pipelineSignal!: AbortSignal;
+    const fixture = setup({
+      runPipeline: vi.fn(async (input) => {
+        pipelineSignal = input.signal;
+        input.onProgress({ phase: "mapping", completed: 1, total: 4 });
+        return pipeline.promise;
+      })
+    });
+    const start = fixture.controller.start({ requestId: "cancel-map", tabId: 4, force: false });
+    await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce());
+
+    await expect(fixture.controller.cancel(4, "cancel-map")).resolves.toMatchObject({ state: "canceled" });
+    expect(pipelineSignal.aborted).toBe(true);
+    pipeline.resolve(summary);
+    await expect(start).resolves.toMatchObject({ state: "canceled" });
+    expect(fixture.events).not.toContainEqual(expect.objectContaining({ type: "job/complete" }));
+  });
+
+  it("cancels active synthesis after navigation and never exposes its late result", async () => {
+    const pipeline = deferred<VideoSummary>();
+    const fixture = setup({ runPipeline: vi.fn(async () => pipeline.promise) });
+    const start = fixture.controller.start({ requestId: "navigate-map", tabId: 4, force: false });
+    await vi.waitFor(() => expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce());
+
+    await fixture.controller.navigated(4, "bbbbbbbbbbb");
+    pipeline.resolve(summary);
+    await expect(start).resolves.toMatchObject({ state: "canceled" });
+    expect(fixture.controller.status(4)).toMatchObject({ state: "canceled" });
+    expect(fixture.events).not.toContainEqual(expect.objectContaining({ type: "job/complete" }));
+  });
+
   it("rejects invalid completion metadata before status or events expose a result", async () => {
     const fixture = setup({
       readVideoContext: vi.fn(async () => ({ ...contextA, title: "bad\u0000title" }))

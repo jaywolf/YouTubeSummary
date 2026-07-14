@@ -196,12 +196,14 @@ export function createOpenAiCompatibleProvider(
   async function repair(
     target: TargetSchema,
     invalidOutput: string,
+    maxOutputTokens: number,
     signal: AbortSignal
   ): Promise<unknown> {
     try {
       const repaired = await nonstreamedText({
         model: config.model,
         stream: false,
+        max_tokens: maxOutputTokens,
         messages: [
           {
             role: "system",
@@ -269,6 +271,7 @@ export function createOpenAiCompatibleProvider(
         const response = await post({
           model: config.model,
           stream: true,
+          max_tokens: request.maxOutputTokens,
           messages: [
             { role: "system", content: request.system },
             { role: "user", content: userContent(request.user, target) }
@@ -347,7 +350,7 @@ export function createOpenAiCompatibleProvider(
         if (request.kind === "repair") {
           throw providerOutputInvalid(error instanceof Error ? error : undefined);
         }
-        return await repair(target, raw, signal);
+        return await repair(target, raw, request.maxOutputTokens, signal);
       }
     }
   };

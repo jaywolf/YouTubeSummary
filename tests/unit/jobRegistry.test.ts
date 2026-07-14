@@ -56,7 +56,7 @@ describe("JobRegistry", () => {
   it("returns serializable discriminated snapshots without controllers", () => {
     const registry = new JobRegistry(() => "request-a", () => 1234);
     const job = registry.begin(4, "aaaaaaaaaaa");
-    registry.progress(job, 0, 1);
+    registry.progress(job, { phase: "synthesizing", completed: 0, total: 1 });
 
     const snapshot = registry.status(4);
     expect(snapshot).toEqual({
@@ -64,12 +64,31 @@ describe("JobRegistry", () => {
       tabId: 4,
       videoId: "aaaaaaaaaaa",
       state: "loading_video",
-      progress: { completed: 0, total: 1 },
+      progress: { phase: "synthesizing", completed: 0, total: 1 },
       startedAt: 1234
     });
     expect(snapshot).not.toHaveProperty("controller");
     expect(snapshot).not.toHaveProperty("signal");
     expect(JSON.parse(JSON.stringify(snapshot))).toEqual(snapshot);
+  });
+
+  it("stores phase-bearing dynamic progress monotonically through completion", () => {
+    const registry = new JobRegistry(() => "request-b");
+    const job = registry.begin(4, "bbbbbbbbbbb");
+
+    expect(registry.progress(job, { phase: "mapping", completed: 0, total: 4 })).toBe(true);
+    expect(registry.progress(job, { phase: "mapping", completed: 3, total: 4 })).toBe(true);
+    expect(registry.progress(job, { phase: "reducing", completed: 3, total: 6 })).toBe(true);
+    expect(() => registry.progress(job, { phase: "mapping", completed: 3, total: 6 })).toThrow();
+    expect(registry.progress(job, { phase: "synthesizing", completed: 6, total: 6 })).toBe(true);
+    expect(() => registry.progress(job, { phase: "reducing", completed: 5, total: 6 })).toThrow();
+    expect(() => registry.progress(job, { phase: "reducing", completed: 6, total: 5 })).toThrow();
+
+    expect(registry.complete(job, result)).toBe(true);
+    expect(registry.status(4)).toMatchObject({
+      state: "complete",
+      progress: { phase: "synthesizing", completed: 6, total: 6 }
+    });
   });
 
   it("cancels idempotently and never exposes a result outside complete", () => {

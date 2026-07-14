@@ -1,5 +1,5 @@
 import type { SafeAppError } from "../domain/errors";
-import type { JobState } from "../domain/messages";
+import type { JobState, PipelineProgress } from "../domain/messages";
 import {
   completedSummaryPayloadSchema,
   type CompletedSummaryPayload
@@ -11,7 +11,7 @@ export type JobIdentity = {
   videoId: string;
 };
 
-export type JobProgress = { completed: number; total: number };
+export type JobProgress = PipelineProgress;
 
 type SnapshotBase = JobIdentity & {
   progress: JobProgress | null;
@@ -42,6 +42,12 @@ type MutableJob = JobIdentity & {
 function isTerminalState(state: JobState): boolean {
   return ["complete", "error", "canceled", "interrupted"].includes(state);
 }
+
+const phaseOrder: Record<PipelineProgress["phase"], number> = {
+  mapping: 0,
+  reducing: 1,
+  synthesizing: 2
+};
 
 function sameIdentity(job: JobIdentity, candidate: JobIdentity): boolean {
   return job.requestId === candidate.requestId
@@ -121,16 +127,23 @@ export class JobRegistry {
     return true;
   }
 
-  progress(candidate: JobIdentity, completed: number, total: number): boolean {
+  progress(candidate: JobIdentity, progress: PipelineProgress): boolean {
     const current = this.#jobs.get(candidate.tabId);
     if (current === undefined || !sameIdentity(current, candidate)
         || current.controller.signal.aborted || isTerminalState(current.state)) {
       return false;
     }
-    if (!Number.isInteger(completed) || !Number.isInteger(total) || completed < 0 || total < 1 || completed > total) {
+    if (!["mapping", "reducing", "synthesizing"].includes(progress.phase)
+        || !Number.isInteger(progress.completed) || !Number.isInteger(progress.total)
+        || progress.completed < 0 || progress.total < 1 || progress.completed > progress.total
+        || current.progress !== null && (
+          progress.completed < current.progress.completed
+          || progress.total < current.progress.total
+          || phaseOrder[progress.phase] < phaseOrder[current.progress.phase]
+        )) {
       throw new Error("Invalid job progress");
     }
-    current.progress = { completed, total };
+    current.progress = { ...progress };
     return true;
   }
 

@@ -260,14 +260,13 @@ export class SummaryController {
         settings,
         provider,
         signal: job.signal,
-        onProgress: (completed, total) => {
-          if (!this.#registry.progress(job, completed, total)) return;
+        onProgress: (progress) => {
+          if (!this.#registry.progress(job, progress)) return;
           this.dependencies.emit({
             type: "job/progress",
             requestId: job.requestId,
             tabId: job.tabId,
-            completed,
-            total
+            ...progress
           });
         }
       });

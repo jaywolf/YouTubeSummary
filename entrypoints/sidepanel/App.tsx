@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { JobSnapshot } from "../../src/background/jobRegistry";
 import type { SafeAppError } from "../../src/domain/errors";
-import type { AppMessage, BackgroundEvent, JobState } from "../../src/domain/messages";
+import type {
+  AppMessage,
+  BackgroundEvent,
+  JobState,
+  PipelineProgress
+} from "../../src/domain/messages";
 import {
   completedSummaryPayloadSchema,
   type CompletedSummaryPayload
@@ -81,9 +86,13 @@ function parseSnapshot(value: unknown): JobSnapshot | null {
     tabId: source.tabId as number,
     videoId: source.videoId,
     progress: source.progress && typeof source.progress === "object"
+      && ["mapping", "reducing", "synthesizing"].includes(
+        String((source.progress as { phase?: unknown }).phase)
+      )
       && Number.isInteger((source.progress as { completed?: unknown }).completed)
       && Number.isInteger((source.progress as { total?: unknown }).total)
       ? {
+          phase: (source.progress as { phase: PipelineProgress["phase"] }).phase,
           completed: (source.progress as { completed: number }).completed,
           total: (source.progress as { total: number }).total
         }
@@ -146,10 +155,21 @@ function copyText(result: CompletedSummaryPayload): string {
   return lines.join("\n");
 }
 
-function phaseLabel(state: JobState): string {
+function phaseLabel(state: JobState, progress: PipelineProgress | null): string {
   if (state === "loading_video") return "Reading the current video";
   if (state === "extracting_transcript") return "Extracting YouTube captions";
-  return "Creating your summary";
+  if (progress?.phase === "mapping") return "Summarizing caption chunks";
+  if (progress?.phase === "reducing") return "Combining chunk summaries";
+  return "Creating final summary";
+}
+
+function progressLabel(progress: PipelineProgress | null): string {
+  if (progress === null) return "This can take a moment for detailed videos.";
+  if (progress.phase === "mapping") {
+    const chunks = Math.max(1, progress.total - 1);
+    return `Chunk ${Math.min(progress.completed + 1, chunks)} of ${chunks}`;
+  }
+  return `Synthesis ${Math.min(progress.completed + 1, progress.total)} of ${progress.total}`;
 }
 
 export function App({ client = browserClient }: { client?: PanelClient }) {
@@ -217,7 +237,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       setSnapshot((current) => current === null ? current : {
         ...current,
         state: "complete",
-        progress: { completed: 1, total: 1 },
+        progress: current.progress,
         result: result.data
       });
     } else if (event.type === "job/error") {
@@ -233,12 +253,17 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
         error: event.error
       });
     } else if (event.type === "job/progress") {
-      if (!Number.isInteger(event.completed) || !Number.isInteger(event.total)
+      if (!["mapping", "reducing", "synthesizing"].includes(event.phase)
+          || !Number.isInteger(event.completed) || !Number.isInteger(event.total)
           || event.completed < 0 || event.total < 1 || event.completed > event.total) return false;
       stateVersionRef.current++;
       setSnapshot((current) => current === null ? current : {
         ...current,
-        progress: { completed: event.completed, total: event.total }
+        progress: {
+          phase: event.phase,
+          completed: event.completed,
+          total: event.total
+        }
       });
     } else {
       if (!["loading_video", "extracting_transcript", "summarizing", "canceled", "interrupted"]
@@ -401,12 +426,8 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       <main className="panel-shell panel-centered">
         <div className="spinner" />
         <p className="eyebrow">YouTube Detailed Summary</p>
-        <h1>{phaseLabel(snapshot.state)}</h1>
-        <p className="state-message">
-          {snapshot.progress && snapshot.progress.total > 1
-            ? `Chunk ${snapshot.progress.completed + 1} of ${snapshot.progress.total}`
-            : "This can take a moment for detailed videos."}
-        </p>
+        <h1>{phaseLabel(snapshot.state, snapshot.progress)}</h1>
+        <p className="state-message">{progressLabel(snapshot.progress)}</p>
         <button className="secondary-action" onClick={() => void cancel()}>Cancel</button>
       </main>
     );
