@@ -105,6 +105,19 @@ describe("model catalog", () => {
     expect(models.some((model) => model.id === "vendor/model-5000")).toBe(false);
   });
 
+  it("keeps generated fallback labels nonempty and within display bounds", async () => {
+    const longId = "x".repeat(256);
+    const fetcher = vi.fn(async () => jsonResponse({
+      data: [{ id: "---" }, { id: longId }]
+    }));
+
+    await expect(loadModelCatalogWithFetcher("openai", "synthetic-secret", fetcher))
+      .resolves.toEqual([
+        { id: "---", label: "---" },
+        { id: longId, label: `X${"x".repeat(159)}` }
+      ]);
+  });
+
   it("maps provider and payload failures to one safe error without leaking secrets", async () => {
     const secret = "catalog-synthetic-secret";
     const rawProviderBody = "RAW PROVIDER BODY catalog-synthetic-secret";

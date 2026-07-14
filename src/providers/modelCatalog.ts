@@ -55,7 +55,9 @@ function parseCatalog(provider: CatalogProvider, payload: unknown): ModelCatalog
     const providerName = provider === "openrouter"
       ? sanitizeLabel((item as { name?: unknown }).name)
       : null;
-    models.push({ id, label: providerName ?? humanizeModelId(id) });
+    const fallbackLabel = sanitizeLabel(humanizeModelId(id)) ?? sanitizeLabel(id);
+    if (fallbackLabel === null) continue;
+    models.push({ id, label: providerName ?? fallbackLabel });
   }
   return models;
 }
