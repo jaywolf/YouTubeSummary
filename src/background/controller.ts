@@ -141,7 +141,9 @@ export class SummaryController {
     this.#reservations.set(request.tabId, reservation);
     this.#preflight.delete(request.tabId);
     if (current !== null && !isTerminal(current)) {
-      this.#registry.cancel(request.tabId, current.requestId);
+      if (this.#registry.cancel(request.tabId, current.requestId)) {
+        this.#emitState(current, "canceled");
+      }
       void this.dependencies.cancelTranscript(request.tabId, current.requestId).catch(() => undefined);
     }
     return reservation;

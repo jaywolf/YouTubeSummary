@@ -527,6 +527,55 @@ describe("SummaryController", () => {
     }));
   });
 
+  it("emits one canceled state for a superseded job before replacement lifecycle events", async () => {
+    const extractionA = deferred<Transcript>();
+    const fixture = setup({
+      extractTranscript: vi.fn(async (_tabId, requestId) =>
+        requestId === "request-a" ? extractionA.promise : transcript)
+    });
+
+    const startA = fixture.controller.start({
+      requestId: "request-a",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    });
+    await vi.waitFor(() => expect(fixture.dependencies.extractTranscript).toHaveBeenCalledOnce());
+
+    const startB = fixture.controller.start({
+      requestId: "request-b",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: true
+    });
+    await expect(startB).resolves.toMatchObject({ requestId: "request-b", state: "complete" });
+
+    const canceledA = fixture.events.filter((event) => {
+      const candidate = event as { type?: string; requestId?: string; state?: string };
+      return candidate.type === "job/state"
+        && candidate.requestId === "request-a"
+        && candidate.state === "canceled";
+    });
+    expect(canceledA).toHaveLength(1);
+    const canceledAIndex = fixture.events.indexOf(canceledA[0]);
+    const firstBIndex = fixture.events.findIndex((event) => {
+      const candidate = event as { type?: string; requestId?: string };
+      return candidate.requestId === "request-b"
+        && (candidate.type === "job/state" || candidate.type === "job/progress");
+    });
+    expect(canceledAIndex).toBeGreaterThanOrEqual(0);
+    expect(firstBIndex).toBeGreaterThan(canceledAIndex);
+    expect(fixture.dependencies.cancelTranscript).toHaveBeenCalledOnce();
+    expect(fixture.dependencies.cancelTranscript).toHaveBeenCalledWith(4, "request-a");
+    expect(fixture.controller.status(4)).toMatchObject({
+      requestId: "request-b",
+      state: "complete"
+    });
+
+    extractionA.resolve(transcript);
+    await expect(startA).resolves.toMatchObject({ requestId: "request-b", state: "complete" });
+  });
+
   it("does not let a late provider result overwrite a replacement job", async () => {
     const pipelineA = deferred<VideoSummary>();
     let pipelineCalls = 0;
