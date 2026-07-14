@@ -171,8 +171,8 @@ describe("options settings", () => {
       "saved-catalog-synthetic-key",
       expect.any(AbortSignal)
     ));
-    await vi.waitFor(() => expect(chooser.value).toBe("vendor/current"));
-    expect(screen.getByRole("option", { name: "Current Model" })).toBeTruthy();
+    expect(await screen.findByRole("option", { name: "Current Model" })).toBeTruthy();
+    expect(chooser.value).toBe("vendor/current");
     expect(document.body.textContent).not.toContain("saved-catalog-synthetic-key");
 
     await userEvent.click(screen.getByRole("button", { name: "Refresh models" }));
