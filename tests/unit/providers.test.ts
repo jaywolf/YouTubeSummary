@@ -470,6 +470,42 @@ describe("provider failure policy", () => {
     await expect(provider.generate(request, () => undefined, signal())).resolves.toEqual(benign);
   });
 
+  it.each([
+    {
+      label: "OpenAI Responses",
+      config: { kind: "openai", apiKey: "synthetic", model: "test" } as ProviderConfig,
+      invalidStream: () => openAiSuccess("not-json"),
+      repairedResponse: (content: string) => new Response(JSON.stringify({
+        status: "completed",
+        output_text: content
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    },
+    {
+      label: "Chat Completions",
+      config: { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" } as ProviderConfig,
+      invalidStream: () => chatSuccess("not-json"),
+      repairedResponse: (content: string) => new Response(JSON.stringify({
+        choices: [{ message: { content }, finish_reason: "stop" }]
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }
+  ])("does not classify benign repair prose as filtered for $label", async ({
+    config,
+    invalidStream,
+    repairedResponse
+  }) => {
+    const benign = {
+      ...summaryContent,
+      overview: ["The speaker explains a workplace safety plan and a polite refusal procedure."]
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(invalidStream())
+      .mockResolvedValueOnce(repairedResponse(JSON.stringify(benign)));
+    const provider = createProvider(config, fetchMock as typeof fetch);
+
+    await expect(provider.generate(request, () => undefined, signal())).resolves.toEqual(benign);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("honors Retry-After through 60 seconds and does not wait above the ceiling", async () => {
     const sleep = vi.fn(async () => undefined);
     const retryingFetch = vi.fn()
@@ -541,7 +577,12 @@ describe("provider failure policy", () => {
       { sleep: async () => undefined }
     );
 
-    await expect(provider.generate(request, () => undefined, signal())).rejects.toBeTruthy();
+    await expect(provider.generate(request, () => undefined, signal()))
+      .rejects.toMatchObject({
+        code: "network_unavailable",
+        retryable: true,
+        recoveryAction: "retry"
+      });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -684,22 +725,38 @@ describe("provider failure policy", () => {
 
   it("does not retry protocol or stream failures before output", async () => {
     const cases = [
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
-      new Response("data: {bad-json}\n\n", {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" }
-      }),
-      sseResponse([{ type: "response.failed", response: { error: { code: 429 } } }])
+      {
+        response: new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }),
+        code: "provider_unavailable"
+      },
+      {
+        response: new Response("data: {bad-json}\n\n", {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" }
+        }),
+        code: "provider_unavailable"
+      },
+      {
+        response: sseResponse([{
+          type: "response.failed",
+          response: { error: { code: 429 } }
+        }]),
+        code: "rate_limited"
+      }
     ];
 
-    for (const response of cases) {
+    for (const { response, code } of cases) {
       const fetchMock = vi.fn(async () => response.clone());
       const provider = createProvider(
         { kind: "openai", apiKey: "synthetic", model: "test" },
         fetchMock as typeof fetch,
         { sleep: async () => undefined }
       );
-      await expect(provider.generate(request, () => undefined, signal())).rejects.toBeTruthy();
+      await expect(provider.generate(request, () => undefined, signal()))
+        .rejects.toMatchObject({ code, retryable: true, recoveryAction: "retry" });
       expect(fetchMock).toHaveBeenCalledOnce();
     }
   });
