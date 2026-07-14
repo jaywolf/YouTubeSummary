@@ -268,7 +268,7 @@ Do not persist raw transcripts, request authorization headers, partial provider 
 
 Browser extension storage is not a secure secret vault, and OpenAI advises against exposing API keys in client-side applications. Before saving a key, settings must disclose that this developer-oriented local BYOK design carries client-side key risk. Documentation recommends a dedicated restricted key, low usage limits where the provider supports them, and immediate key rotation if exposure is suspected.
 
-The API key field is masked after save. The extension provides **Replace key**, non-destructive **Cancel replacement**, and confirmed **Clear saved key** actions, never a reveal or copy-key action.
+The API key field is masked after save. The extension provides **Replace key**, non-destructive **Cancel replacement**, and confirmed **Clear saved provider** actions, never a reveal or copy-key action.
 
 ### 9.3 Permissions
 

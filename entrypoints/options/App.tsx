@@ -148,7 +148,7 @@ function CredentialControls({
         <span aria-label="Credential status">Key saved</span>
         <div className="button-row">
           <button type="button" className="secondary" onClick={onReplace}>Replace key</button>
-          <button type="button" className="danger" onClick={onClear}>Clear saved key</button>
+          <button type="button" className="danger" onClick={onClear}>Clear saved provider</button>
         </div>
       </div>
     );
@@ -175,12 +175,12 @@ function CredentialControls({
         <span>{DISCLOSURE}</span>
       </label>
       {hasSavedKey ? (
-        <div className="button-row clear-replacement">
+        <div className="button-row">
           <button type="button" className="secondary" onClick={onCancelReplacement}>
             Cancel replacement
           </button>
           <button type="button" className="danger" onClick={onClear}>
-            Clear saved key
+            Clear saved provider
           </button>
         </div>
       ) : null}

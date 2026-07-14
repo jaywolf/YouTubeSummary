@@ -350,6 +350,14 @@ button:disabled {
   opacity: 0.45;
 }
 
+button:focus-visible,
+.disclosure input:focus-visible,
+.toggle-row input:focus-visible,
+.advanced-model-toggle input:focus-visible {
+  outline: 3px solid #a89bff;
+  outline-offset: 3px;
+}
+
 .notice {
   margin: 0;
   padding: 12px 14px;

@@ -304,7 +304,7 @@ describe("options settings", () => {
     expect(screen.queryByLabelText("API key")).toBeNull();
     expect(screen.queryByRole("button", { name: /reveal/i })).toBeNull();
     expect(screen.getByRole("button", { name: "Replace key" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Clear saved key" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear saved provider" })).toBeTruthy();
   });
 
   it("offers replacement cancel and confirmed saved-key clearing without exposing the key", async () => {
@@ -327,7 +327,7 @@ describe("options settings", () => {
     expect(document.body.textContent).not.toContain("draft-synthetic-key");
 
     await userEvent.click(screen.getByRole("button", { name: "Replace key" }));
-    await userEvent.click(screen.getByRole("button", { name: "Clear saved key" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clear saved provider" }));
 
     expect(confirm).toHaveBeenCalledOnce();
     expect(repository.clear).toHaveBeenCalledOnce();
@@ -496,7 +496,7 @@ describe("options settings", () => {
     expect(document.body.textContent).not.toContain("old-origin-synthetic-key");
   });
 
-  it.each(["Replace key", "Clear saved key"])(
+  it.each(["Replace key", "Clear saved provider"])(
     "aborts a pending connection test before %s mutates credentials",
     async (action) => {
       let requestSignal: AbortSignal | null = null;

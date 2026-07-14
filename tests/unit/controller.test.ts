@@ -478,6 +478,10 @@ describe("SummaryController", () => {
         }
       });
     expect(missing.dependencies.createProvider).not.toHaveBeenCalled();
+    expect(missing.events).not.toContainEqual(expect.objectContaining({
+      type: "job/state",
+      state: "loading_video"
+    }));
 
     const invalid = setup({
       loadSettings: vi.fn(async () => {
