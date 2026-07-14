@@ -183,6 +183,49 @@ describe("OpenAI Responses provider", () => {
     }
   });
 
+  it("rejects OpenAI connection cap envelopes that also contain errors or refusals", async () => {
+    const cases = [
+      {
+        payload: {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+          error: { status: 429, message: "private detail" }
+        },
+        code: "rate_limited"
+      },
+      {
+        payload: {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+          output_text: "{\"ok\":true}",
+          refusal: "private detail"
+        },
+        code: "content_filtered"
+      },
+      {
+        payload: {
+          status: "completed",
+          output_text: "{\"ok\":true}",
+          output: [{ content: [{ type: "refusal", refusal: "private detail" }] }]
+        },
+        code: "content_filtered"
+      }
+    ];
+    for (const { payload, code } of cases) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+      const caught = await createProvider(
+        { kind: "openai", apiKey: "private-detail", model: "gpt-test" },
+        fetchMock as typeof fetch
+      ).testConnection(signal()).catch((error) => error);
+      expect(caught).toMatchObject({ code });
+      expect(JSON.stringify(caught)).not.toContain("private detail");
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
   it("rejects a connection response with an unexpected content type", async () => {
     const fetchMock = vi.fn(async () => new Response("{\"output_text\":\"{\\\"ok\\\":true}\"}", {
       status: 200,
@@ -287,6 +330,49 @@ describe("OpenAI-compatible providers", () => {
       { payload: { choices: [{ finish_reason: "length" }] }, code: "provider_output_invalid" }
     ];
     for (const { payload, code } of rejected) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+      const caught = await createProvider(
+        { kind: "openrouter", apiKey: "private-detail", model: "vendor/model" },
+        fetchMock as typeof fetch
+      ).testConnection(signal()).catch((error) => error);
+      expect(caught).toMatchObject({ code });
+      expect(JSON.stringify(caught)).not.toContain("private detail");
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("rejects Chat connection length/completed envelopes with errors or refusals", async () => {
+    const cases = [
+      {
+        payload: {
+          error: { status: 403, message: "private detail" },
+          choices: [{ message: { content: "{\"ok\":true}" }, finish_reason: "length" }]
+        },
+        code: "provider_forbidden"
+      },
+      {
+        payload: {
+          choices: [{
+            message: { content: "{\"ok\":true}", refusal: "private detail" },
+            finish_reason: "length"
+          }]
+        },
+        code: "content_filtered"
+      },
+      {
+        payload: {
+          choices: [{
+            message: { content: "{\"ok\":true}", refusal: "private detail" },
+            finish_reason: "stop"
+          }]
+        },
+        code: "content_filtered"
+      }
+    ];
+    for (const { payload, code } of cases) {
       const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" }
@@ -433,6 +519,59 @@ describe("provider failure policy", () => {
     const repair = JSON.parse(String(fetchMock.mock.calls[1]![1].body));
     expect(repair.stream).toBe(false);
     expect(repair.input).toContain("not-json");
+  });
+
+  it("rejects valid OpenAI repair text inside incomplete, failed, error, or refusal envelopes", async () => {
+    const repaired = JSON.stringify(summaryContent);
+    const envelopes = [
+      { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output_text: repaired },
+      { status: "failed", error: { status: 503 }, output_text: repaired },
+      { status: "completed", error: { status: 429 }, output_text: repaired },
+      { status: "completed", refusal: "blocked", output_text: repaired }
+    ];
+    for (const envelope of envelopes) {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(openAiSuccess("not-json"))
+        .mockResolvedValueOnce(new Response(JSON.stringify(envelope), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }));
+      const provider = createProvider(
+        { kind: "openai", apiKey: "synthetic", model: "test" },
+        fetchMock as typeof fetch
+      );
+
+      await expect(provider.generate(request, () => undefined, signal()))
+        .rejects.toMatchObject({ code: "provider_output_invalid" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("rejects valid Chat repair text inside length, filter, refusal, or error envelopes", async () => {
+    const content = JSON.stringify(summaryContent);
+    const envelopes = [
+      { choices: [{ message: { content }, finish_reason: "length" }] },
+      { choices: [{ message: { content }, finish_reason: "content_filter" }] },
+      { choices: [{ message: { content }, finish_reason: "refusal" }] },
+      { choices: [{ message: { content, refusal: "blocked" }, finish_reason: "stop" }] },
+      { error: { status: 503 }, choices: [{ message: { content }, finish_reason: "stop" }] }
+    ];
+    for (const envelope of envelopes) {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(chatSuccess("not-json"))
+        .mockResolvedValueOnce(new Response(JSON.stringify(envelope), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }));
+      const provider = createProvider(
+        { kind: "openrouter", apiKey: "synthetic", model: "vendor/model" },
+        fetchMock as typeof fetch
+      );
+
+      await expect(provider.generate(request, () => undefined, signal()))
+        .rejects.toMatchObject({ code: "provider_output_invalid" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
   });
 
   it("maps cancellation to request_canceled", async () => {

@@ -1,6 +1,7 @@
 import { AppError } from "../domain/errors";
 import type { ProviderConfig } from "../domain/settings";
 import {
+  isProviderContentFiltered,
   normalizeProviderError,
   providerContentFiltered,
   providerHttpError,
@@ -55,6 +56,38 @@ function stripSingleJsonFence(value: string): string {
 
 function validateOutput(raw: string, target: TargetSchema): unknown {
   return target.schema.parse(target.normalize(JSON.parse(stripSingleJsonFence(raw))));
+}
+
+function parseNonstreamedEnvelope(
+  payload: unknown,
+  allowConnectionCap: boolean
+): { text: string; capped: boolean } {
+  if (isProviderContentFiltered(payload)) throw providerContentFiltered();
+  if (payload && typeof payload === "object") {
+    const streamError = (payload as { error?: unknown }).error;
+    if (streamError !== undefined) throw providerStreamError(streamError);
+  }
+
+  const choices = payload && typeof payload === "object"
+    ? (payload as { choices?: unknown }).choices
+    : undefined;
+  const first = Array.isArray(choices) ? choices[0] : undefined;
+  const finishReason = first && typeof first === "object"
+    ? (first as { finish_reason?: unknown }).finish_reason
+    : undefined;
+  const text = completionText(payload);
+  if (text === null) throw providerOutputInvalid();
+  if (finishReason === "length") {
+    if (allowConnectionCap) return { text, capped: true };
+    throw providerOutputInvalid();
+  }
+  if (finishReason === "content_filter" || finishReason === "refusal") {
+    throw providerContentFiltered();
+  }
+  if (finishReason !== undefined && finishReason !== null && finishReason !== "stop") {
+    throw providerOutputInvalid();
+  }
+  return { text, capped: false };
 }
 
 function invalidProtocol(message: string): AppError {
@@ -157,9 +190,7 @@ export function createOpenAiCompatibleProvider(
     signal: AbortSignal
   ): Promise<string> {
     const payload = await nonstreamedPayload(body, signal);
-    const text = completionText(payload);
-    if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
-    return text;
+    return parseNonstreamedEnvelope(payload, false).text;
   }
 
   async function repair(
@@ -217,22 +248,9 @@ export function createOpenAiCompatibleProvider(
         ],
         ...formatBody(connectionTarget)
       }, signal);
-      let finishReason: unknown;
-      if (payload && typeof payload === "object") {
-        const streamError = (payload as { error?: unknown }).error;
-        if (streamError !== undefined) throw providerStreamError(streamError);
-        const choices = (payload as { choices?: unknown }).choices;
-        const first = Array.isArray(choices) ? choices[0] : undefined;
-        finishReason = first && typeof first === "object"
-          ? (first as { finish_reason?: unknown }).finish_reason
-          : undefined;
-        if (finishReason === "content_filter" || finishReason === "refusal") {
-          throw providerContentFiltered();
-        }
-      }
-      const raw = completionText(payload);
-      if (raw === null) throw providerOutputInvalid();
-      if (finishReason === "length") return;
+      const connection = parseNonstreamedEnvelope(payload, true);
+      if (connection.capped) return;
+      const raw = connection.text;
       let parsed: unknown;
       try {
         parsed = JSON.parse(stripSingleJsonFence(raw));

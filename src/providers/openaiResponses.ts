@@ -93,6 +93,28 @@ function validateOutput(raw: string, target: TargetSchema): unknown {
   return target.schema.parse(target.normalize(JSON.parse(raw)));
 }
 
+function inspectNonstreamedEnvelope(payload: unknown, allowConnectionCap: boolean): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  if (isProviderContentFiltered(payload)) throw providerContentFiltered();
+
+  const status = (payload as { status?: unknown }).status;
+  if (status === "failed" || (payload as { error?: unknown }).error !== undefined) {
+    throw providerStreamError(payload);
+  }
+  if (status === "incomplete") {
+    const details = (payload as { incomplete_details?: unknown }).incomplete_details;
+    const reason = details && typeof details === "object"
+      ? (details as { reason?: unknown }).reason
+      : undefined;
+    if (allowConnectionCap && reason === "max_output_tokens") return true;
+    throw providerIncomplete(reason);
+  }
+  if (status !== undefined && status !== "completed") {
+    throw invalidProtocol("The provider returned an invalid response status.");
+  }
+  return false;
+}
+
 export function createOpenAiResponsesProvider(
   config: OpenAiConfig,
   fetchImpl: typeof fetch,
@@ -133,6 +155,7 @@ export function createOpenAiResponsesProvider(
     signal: AbortSignal
   ): Promise<string> {
     const payload = await nonstreamedPayload(body, signal);
+    inspectNonstreamedEnvelope(payload, false);
     const text = outputText(payload);
     if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
     return text;
@@ -189,20 +212,7 @@ export function createOpenAiResponsesProvider(
           }
         }
       }, signal);
-      if (payload && typeof payload === "object") {
-        const status = (payload as { status?: unknown }).status;
-        if (status === "incomplete") {
-          const details = (payload as { incomplete_details?: unknown }).incomplete_details;
-          const reason = details && typeof details === "object"
-            ? (details as { reason?: unknown }).reason
-            : undefined;
-          if (reason === "max_output_tokens") return;
-          throw providerIncomplete(reason);
-        }
-        if (status === "failed" || (payload as { error?: unknown }).error !== undefined) {
-          throw providerStreamError(payload);
-        }
-      }
+      if (inspectNonstreamedEnvelope(payload, true)) return;
       const raw = outputText(payload);
       if (raw === null) throw providerOutputInvalid();
       let parsed: unknown;
