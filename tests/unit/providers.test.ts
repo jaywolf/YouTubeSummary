@@ -130,6 +130,12 @@ describe("OpenAI Responses provider", () => {
     await expect(provider.testConnection(signal())).resolves.toBeUndefined();
     const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     expect(body).toEqual(expect.objectContaining({ max_output_tokens: 16, stream: false, store: false }));
+    expect(body.text.format.schema).toEqual({
+      type: "object",
+      properties: { ok: { type: "boolean", const: true } },
+      required: ["ok"],
+      additionalProperties: false
+    });
     expect(JSON.stringify(body)).not.toMatch(/transcript|BEGIN TRANSCRIPT/i);
   });
 
@@ -204,6 +210,12 @@ describe("OpenAI-compatible providers", () => {
     await expect(provider.testConnection(signal())).resolves.toBeUndefined();
     const body = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body));
     expect(body).toEqual(expect.objectContaining({ max_tokens: 16, stream: false }));
+    expect(body.response_format.json_schema.schema).toEqual({
+      type: "object",
+      properties: { ok: { type: "boolean", const: true } },
+      required: ["ok"],
+      additionalProperties: false
+    });
     expect(JSON.stringify(body)).not.toMatch(/transcript|BEGIN TRANSCRIPT/i);
   });
 });

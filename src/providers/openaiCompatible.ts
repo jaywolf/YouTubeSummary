@@ -195,7 +195,7 @@ export function createOpenAiCompatibleProvider(
         name: "connection_test",
         jsonSchema: {
           type: "object",
-          properties: { ok: { const: true } },
+          properties: { ok: { type: "boolean", const: true } },
           required: ["ok"],
           additionalProperties: false
         }

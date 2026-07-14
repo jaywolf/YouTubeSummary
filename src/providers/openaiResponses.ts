@@ -162,7 +162,7 @@ export function createOpenAiResponsesProvider(
     async testConnection(signal) {
       const connectionSchema = {
         type: "object",
-        properties: { ok: { const: true } },
+        properties: { ok: { type: "boolean", const: true } },
         required: ["ok"],
         additionalProperties: false
       };
