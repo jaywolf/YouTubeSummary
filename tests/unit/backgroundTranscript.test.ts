@@ -32,20 +32,30 @@ const transcript = {
 
 describe("background transcript bridge", () => {
   let background: Record<string, (...args: never[]) => Promise<unknown>>;
+  let installedListener: (() => unknown) | undefined;
   const executeScript = vi.fn(async () => [{ frameId: 0, result: rawSnapshot }]);
   const sendMessage = vi.fn<() => Promise<unknown>>(async () => transcript);
+  const localSetAccessLevel = vi.fn(async () => undefined);
+  const sessionSetAccessLevel = vi.fn(async () => undefined);
+  const setPanelBehavior = vi.fn(async () => undefined);
 
   beforeAll(async () => {
     vi.stubGlobal("defineBackground", (callback: unknown) => callback);
     vi.stubGlobal("browser", {
       scripting: { executeScript },
       tabs: { sendMessage },
-      runtime: { onInstalled: { addListener: vi.fn() } },
-      storage: {
-        local: { setAccessLevel: vi.fn() },
-        session: { setAccessLevel: vi.fn() }
+      runtime: {
+        onInstalled: {
+          addListener: vi.fn((listener: () => unknown) => {
+            installedListener = listener;
+          })
+        }
       },
-      sidePanel: { setPanelBehavior: vi.fn() }
+      storage: {
+        local: { setAccessLevel: localSetAccessLevel },
+        session: { setAccessLevel: sessionSetAccessLevel }
+      },
+      sidePanel: { setPanelBehavior }
     });
     background = await import("../../entrypoints/background") as unknown as typeof background;
   });
@@ -70,6 +80,22 @@ describe("background transcript bridge", () => {
       tabId: 9,
       context: expect.objectContaining({ videoId: "abcdefghijk" })
     }));
+  });
+
+  it("enforces trusted storage on every startup and configures the panel idempotently", async () => {
+    const definition = (background as unknown as { default: () => void | Promise<void> }).default;
+    await definition();
+
+    expect(localSetAccessLevel).toHaveBeenCalledOnce();
+    expect(localSetAccessLevel).toHaveBeenCalledWith({ accessLevel: "TRUSTED_CONTEXTS" });
+    expect(sessionSetAccessLevel).toHaveBeenCalledOnce();
+    expect(sessionSetAccessLevel).toHaveBeenCalledWith({ accessLevel: "TRUSTED_CONTEXTS" });
+    expect(setPanelBehavior).toHaveBeenCalledOnce();
+
+    await installedListener?.();
+    expect(setPanelBehavior).toHaveBeenCalledTimes(2);
+    expect(localSetAccessLevel).toHaveBeenCalledOnce();
+    expect(sessionSetAccessLevel).toHaveBeenCalledOnce();
   });
 
   it("forwards explicit serializable cancellation", async () => {

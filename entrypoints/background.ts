@@ -69,10 +69,15 @@ export async function cancelTranscriptExtraction(tabId: number, requestId: strin
   });
 }
 
-export default defineBackground(() => {
-  browser.runtime.onInstalled.addListener(async () => {
-    await browser.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-    await browser.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-    await browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+export default defineBackground(async () => {
+  const configurePanel = () => browser.sidePanel.setPanelBehavior({
+    openPanelOnActionClick: true
   });
+
+  browser.runtime.onInstalled.addListener(configurePanel);
+  await Promise.all([
+    browser.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
+    browser.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
+    configurePanel()
+  ]);
 });
