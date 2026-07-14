@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { AppError } from "../../src/domain/errors";
 import {
   DEFAULT_SETTINGS,
   parseSettings,
@@ -14,6 +15,7 @@ import {
   browserSettingsRepository,
   type SettingsRepository
 } from "../../src/platform/storage";
+import { createProvider } from "../../src/providers/factory";
 
 const DISCLOSURE = "This local BYOK extension stores the key on this device. Browser storage is not a secure vault. Use a dedicated restricted key and set provider spending limits.";
 
@@ -139,8 +141,10 @@ export function App({
   const [loading, setLoading] = useState(true);
   const [storageInvalid, setStorageInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const connectionAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -158,6 +162,7 @@ export function App({
     });
     return () => {
       active = false;
+      connectionAbortRef.current?.abort();
     };
   }, [settingsRepository]);
 
@@ -185,6 +190,9 @@ export function App({
     && form.outputLanguage.trim().length > 0;
 
   function selectProvider(providerKind: ProviderKind) {
+    connectionAbortRef.current?.abort();
+    connectionAbortRef.current = null;
+    setTestingConnection(false);
     setError(null);
     setStatus(null);
     setForm((current) => ({
@@ -281,6 +289,33 @@ export function App({
       setError("Stored settings could not be reset.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTestConnection() {
+    if (savedProvider === null || savedProvider.kind !== form.providerKind || form.replacingKey) {
+      return;
+    }
+    connectionAbortRef.current?.abort();
+    const controller = new AbortController();
+    connectionAbortRef.current = controller;
+    setTestingConnection(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await createProvider(savedProvider, fetch).testConnection(controller.signal);
+      if (!controller.signal.aborted) setStatus("Connected");
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        setError(caught instanceof AppError
+          ? caught.safeMessage
+          : "The provider connection could not be tested. Try again.");
+      }
+    } finally {
+      if (connectionAbortRef.current === controller) {
+        connectionAbortRef.current = null;
+        setTestingConnection(false);
+      }
     }
   }
 
@@ -392,8 +427,15 @@ export function App({
                 />
 
                 <div className="test-connection">
-                  <button type="button" className="secondary" disabled>Test connection</button>
-                  <small>Available after provider adapters are installed</small>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={testingConnection || !hasSavedKey || form.replacingKey}
+                    onClick={handleTestConnection}
+                  >
+                    {testingConnection ? "Testing…" : "Test connection"}
+                  </button>
+                  <small>Tests the provider and model using the saved key.</small>
                 </div>
               </div>
             ) : null}

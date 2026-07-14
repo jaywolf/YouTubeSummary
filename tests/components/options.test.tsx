@@ -10,7 +10,10 @@ import {
 import type { PermissionsAdapter } from "../../src/platform/permissions";
 import type { SettingsRepository } from "../../src/platform/storage";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 function memoryRepository(initial: ExtensionSettings = DEFAULT_SETTINGS): SettingsRepository & {
   clear: ReturnType<typeof vi.fn>;
@@ -186,5 +189,40 @@ describe("options settings", () => {
     expect(confirm).toHaveBeenCalledOnce();
     expect(repository.clear).toHaveBeenCalledOnce();
     expect(repository.saved).toHaveLength(0);
+  });
+
+  it("tests a saved provider connection and reports Testing then Connected", async () => {
+    let resolveFetch!: (response: Response) => void;
+    const fetchMock = vi.fn(async () => await new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const repository = memoryRepository(parseSettings({
+      provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "test-model" }
+    }));
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+    expect(screen.getByRole("button", { name: "Testing…" })).toBeTruthy();
+    resolveFetch(new Response(JSON.stringify({ output_text: "{\"ok\":true}" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+
+    expect(await screen.findByText("Connected")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("shows only a mapped safe connection error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("stored-synthetic-key", { status: 401 })));
+    const repository = memoryRepository(parseSettings({
+      provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "test-model" }
+    }));
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("rejected the saved API key");
+    expect(document.body.textContent).not.toContain("stored-synthetic-key");
   });
 });

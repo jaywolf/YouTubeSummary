@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SafeAppError } from "./errors";
+import type { CompletedSummaryPayload } from "./summary";
 import {
   transcriptPreferenceSchema,
   transcriptSchema,
@@ -37,6 +38,12 @@ export type JobState =
 export type BackgroundEvent =
   | { type: "job/state"; requestId: string; tabId: number; state: JobState }
   | { type: "job/progress"; requestId: string; tabId: number; completed: number; total: number }
+  | {
+      type: "job/complete";
+      requestId: string;
+      tabId: number;
+      result: CompletedSummaryPayload;
+    }
   | { type: "job/error"; requestId: string; tabId: number; error: SafeAppError };
 
 export function parseAppMessage(value: unknown): AppMessage {

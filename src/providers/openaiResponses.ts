@@ -1,0 +1,259 @@
+import { AppError } from "../domain/errors";
+import type { ProviderConfig } from "../domain/settings";
+import {
+  normalizeProviderError,
+  providerHttpError,
+  providerOutputInvalid
+} from "./providerErrors";
+import { withProviderRetry } from "./retry";
+import { parseSse } from "./sse";
+import {
+  targetSchema,
+  type ProviderClient,
+  type ProviderDependencies,
+  type ProviderEvent,
+  type ProviderRequest,
+  type TargetSchema
+} from "./types";
+
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+
+type OpenAiConfig = Extract<ProviderConfig, { kind: "openai" }>;
+
+function headers(apiKey: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+}
+
+function structuredFormat(target: TargetSchema): Record<string, unknown> {
+  return {
+    type: "json_schema",
+    name: target.name,
+    schema: target.jsonSchema,
+    strict: true
+  };
+}
+
+function usageEvent(input: unknown, output: unknown): ProviderEvent | null {
+  const event: { type: "usage"; inputTokens?: number; outputTokens?: number } = { type: "usage" };
+  if (typeof input === "number" && Number.isFinite(input)) event.inputTokens = input;
+  if (typeof output === "number" && Number.isFinite(output)) event.outputTokens = output;
+  return event.inputTokens === undefined && event.outputTokens === undefined ? null : event;
+}
+
+function outputText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const direct = (payload as { output_text?: unknown }).output_text;
+  if (typeof direct === "string") return direct;
+  const output = (payload as { output?: unknown }).output;
+  if (!Array.isArray(output)) return null;
+  const texts: string[] = [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const text = (part as { text?: unknown }).text;
+      if (typeof text === "string") texts.push(text);
+    }
+  }
+  return texts.length > 0 ? texts.join("") : null;
+}
+
+function invalidProtocol(message: string): AppError {
+  return new AppError({
+    code: "provider_unavailable",
+    retryable: true,
+    safeMessage: message,
+    recoveryAction: "retry"
+  });
+}
+
+function requireContentType(response: Response, expected: string): void {
+  const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
+  if (!contentType.includes(expected)) {
+    throw invalidProtocol("The provider returned an unexpected response format.");
+  }
+}
+
+function canceledError(signal: AbortSignal): DOMException {
+  return signal.reason instanceof DOMException && signal.reason.name === "AbortError"
+    ? signal.reason
+    : new DOMException("Summary generation was canceled.", "AbortError");
+}
+
+function validateOutput(raw: string, target: TargetSchema): unknown {
+  return target.schema.parse(JSON.parse(raw));
+}
+
+export function createOpenAiResponsesProvider(
+  config: OpenAiConfig,
+  fetchImpl: typeof fetch,
+  dependencies: ProviderDependencies = {}
+): ProviderClient {
+  async function post(body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+    if (signal.aborted) throw canceledError(signal);
+    try {
+      const response = await fetchImpl(OPENAI_RESPONSES_URL, {
+        method: "POST",
+        headers: headers(config.apiKey),
+        body: JSON.stringify(body),
+        signal
+      });
+      if (!response.ok) throw providerHttpError(response);
+      return response;
+    } catch (error) {
+      if (signal.aborted) throw normalizeProviderError(canceledError(signal), config.apiKey);
+      throw normalizeProviderError(error, config.apiKey);
+    }
+  }
+
+  async function nonstreamedText(
+    body: Record<string, unknown>,
+    signal: AbortSignal
+  ): Promise<string> {
+    const response = await post(body, signal);
+    try {
+      requireContentType(response, "application/json");
+      const payload: unknown = await response.json();
+      const text = outputText(payload);
+      if (text === null) throw invalidProtocol("The provider returned an unreadable response.");
+      return text;
+    } catch (error) {
+      throw normalizeProviderError(error, config.apiKey);
+    }
+  }
+
+  async function repair(
+    target: TargetSchema,
+    invalidOutput: string,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    try {
+      const repaired = await nonstreamedText({
+        model: config.model,
+        stream: false,
+        store: false,
+        instructions: "Repair the supplied model output into valid JSON matching the required schema. Return JSON only.",
+        input: [
+          "BEGIN INVALID MODEL OUTPUT",
+          invalidOutput,
+          "END INVALID MODEL OUTPUT",
+          `Required schema: ${JSON.stringify(target.jsonSchema)}`
+        ].join("\n"),
+        text: { format: structuredFormat(target) }
+      }, signal);
+      return validateOutput(repaired, target);
+    } catch (error) {
+      const normalized = normalizeProviderError(error, config.apiKey);
+      if (normalized.code === "request_canceled") throw normalized;
+      throw providerOutputInvalid(error instanceof Error ? error : undefined);
+    }
+  }
+
+  return {
+    async testConnection(signal) {
+      const connectionSchema = {
+        type: "object",
+        properties: { ok: { const: true } },
+        required: ["ok"],
+        additionalProperties: false
+      };
+      const raw = await nonstreamedText({
+        model: config.model,
+        stream: false,
+        store: false,
+        max_output_tokens: 16,
+        instructions: "Return exactly the requested small JSON object.",
+        input: "Return {\"ok\":true}.",
+        text: {
+          format: {
+            type: "json_schema",
+            name: "connection_test",
+            schema: connectionSchema,
+            strict: true
+          }
+        }
+      }, signal);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (error) {
+        throw providerOutputInvalid(error instanceof Error ? error : undefined);
+      }
+      if (!parsed || typeof parsed !== "object" || (parsed as { ok?: unknown }).ok !== true) {
+        throw providerOutputInvalid();
+      }
+    },
+
+    async generate(request, onEvent, signal) {
+      const target = targetSchema(request.schema);
+      let outputBytes = 0;
+      const execute = async (): Promise<string> => {
+        const response = await post({
+          model: config.model,
+          stream: true,
+          store: false,
+          instructions: request.system,
+          input: request.user,
+          text: { format: structuredFormat(target) }
+        }, signal);
+        requireContentType(response, "text/event-stream");
+        if (response.body === null) throw invalidProtocol("The provider returned an empty stream.");
+        onEvent({ type: "connected" });
+        let raw = "";
+        try {
+          for await (const data of parseSse(response.body, signal)) {
+            const event: unknown = JSON.parse(data);
+            if (!event || typeof event !== "object") continue;
+            const type = (event as { type?: unknown }).type;
+            if (type === "response.output_text.delta") {
+              const delta = (event as { delta?: unknown }).delta;
+              if (typeof delta !== "string") continue;
+              raw += delta;
+              const count = new TextEncoder().encode(delta).byteLength;
+              outputBytes += count;
+              onEvent({ type: "output-bytes", count });
+            } else if (type === "response.completed") {
+              const responsePayload = (event as { response?: unknown }).response;
+              const usage = responsePayload && typeof responsePayload === "object"
+                ? (responsePayload as { usage?: unknown }).usage
+                : undefined;
+              if (usage && typeof usage === "object") {
+                const normalized = usageEvent(
+                  (usage as { input_tokens?: unknown }).input_tokens,
+                  (usage as { output_tokens?: unknown }).output_tokens
+                );
+                if (normalized) onEvent(normalized);
+              }
+            } else if (type === "error" || type === "response.failed") {
+              throw invalidProtocol("The provider could not complete the response.");
+            }
+          }
+          return raw;
+        } catch (error) {
+          if (signal.aborted) throw normalizeProviderError(canceledError(signal), config.apiKey);
+          throw normalizeProviderError(error, config.apiKey);
+        }
+      };
+
+      const raw = await withProviderRetry(
+        execute,
+        () => outputBytes,
+        signal,
+        dependencies.sleep
+      );
+      try {
+        return validateOutput(raw, target);
+      } catch (error) {
+        if (request.kind === "repair") {
+          throw providerOutputInvalid(error instanceof Error ? error : undefined);
+        }
+        return await repair(target, raw, signal);
+      }
+    }
+  };
+}
