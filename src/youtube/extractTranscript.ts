@@ -57,6 +57,7 @@ export async function extractTranscript(
 ): Promise<Transcript> {
   signal.throwIfAborted();
   const track = selectCaptionTrack(context.captionTracks, preference);
+  let captionFetchFailure: { cause: unknown } | null = null;
 
   if (track !== undefined) {
     try {
@@ -66,7 +67,7 @@ export async function extractTranscript(
       if (segments.length > 0) return { track, segments };
     } catch (error) {
       if (isAbortError(error) || signal.aborted) throw error;
-      throw extractionError(error);
+      captionFetchFailure = { cause: error };
     }
   }
 
@@ -79,5 +80,6 @@ export async function extractTranscript(
     throw extractionError(error);
   }
 
+  if (captionFetchFailure !== null) throw extractionError(captionFetchFailure.cause);
   throw unavailableError();
 }
