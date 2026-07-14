@@ -60,10 +60,16 @@ function parseCatalog(provider: CatalogProvider, payload: unknown): ModelCatalog
   return models;
 }
 
-export async function loadModelCatalog(
+export const loadModelCatalog: ModelCatalogLoader = (
+  provider,
+  apiKey,
+  signal
+) => loadModelCatalogWithFetcher(provider, apiKey, fetch, signal);
+
+export async function loadModelCatalogWithFetcher(
   provider: CatalogProvider,
   apiKey: string,
-  fetcher: Fetcher = fetch,
+  fetcher: Fetcher,
   signal?: AbortSignal
 ): Promise<ModelCatalogEntry[]> {
   const key = apiKey.trim();

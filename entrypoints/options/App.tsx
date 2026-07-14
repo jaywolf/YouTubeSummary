@@ -54,8 +54,7 @@ type AppProps = {
 
 type CatalogState = "idle" | "loading" | "ready" | "error";
 
-const browserModelCatalogLoader: ModelCatalogLoader = (provider, apiKey, signal) =>
-  loadModelCatalog(provider, apiKey, fetch, signal);
+const browserModelCatalogLoader: ModelCatalogLoader = loadModelCatalog;
 
 async function clearBrowserSummaries(): Promise<void> {
   const response: unknown = await browser.runtime.sendMessage({

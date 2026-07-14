@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadModelCatalog } from "../../src/providers/modelCatalog";
+import {
+  loadModelCatalog,
+  loadModelCatalogWithFetcher,
+  type ModelCatalogLoader
+} from "../../src/providers/modelCatalog";
+
+const typedLoader: ModelCatalogLoader = loadModelCatalog;
+void typedLoader;
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -21,7 +28,7 @@ describe("model catalog", () => {
       ]
     }));
 
-    await expect(loadModelCatalog("openai", "openai-synthetic-secret", fetcher))
+    await expect(loadModelCatalogWithFetcher("openai", "openai-synthetic-secret", fetcher))
       .resolves.toEqual([
         { id: "acme-alpha_2", label: "Acme Alpha 2" },
         { id: "next.model", label: "Next Model" }
@@ -45,7 +52,7 @@ describe("model catalog", () => {
       ]
     }));
 
-    await expect(loadModelCatalog(
+    await expect(loadModelCatalogWithFetcher(
       "openrouter",
       "openrouter-synthetic-secret",
       fetcher,
@@ -70,13 +77,13 @@ describe("model catalog", () => {
   it("returns an empty catalog for a valid empty provider response", async () => {
     const fetcher = vi.fn(async () => jsonResponse({ data: [] }));
 
-    await expect(loadModelCatalog("openai", "synthetic-secret", fetcher)).resolves.toEqual([]);
+    await expect(loadModelCatalogWithFetcher("openai", "synthetic-secret", fetcher)).resolves.toEqual([]);
   });
 
   it("rejects an empty key before making a provider request", async () => {
     const fetcher = vi.fn(async () => jsonResponse({ data: [] }));
 
-    await expect(loadModelCatalog("openai", "  \n\t ", fetcher)).rejects.toThrow(
+    await expect(loadModelCatalogWithFetcher("openai", "  \n\t ", fetcher)).rejects.toThrow(
       "Models could not be loaded. Check the API key and try again."
     );
     expect(fetcher).not.toHaveBeenCalled();
@@ -89,7 +96,7 @@ describe("model catalog", () => {
     }));
     const fetcher = vi.fn(async () => jsonResponse({ data }));
 
-    const models = await loadModelCatalog("openrouter", "synthetic-secret", fetcher);
+    const models = await loadModelCatalogWithFetcher("openrouter", "synthetic-secret", fetcher);
     expect(models).toHaveLength(4_999);
     expect(models[0]).toEqual({
       id: "vendor/model-1",
@@ -112,7 +119,7 @@ describe("model catalog", () => {
     for (const fetcher of [rejected, malformed, invalidJson, networkFailure]) {
       let thrown: unknown;
       try {
-        await loadModelCatalog("openai", secret, fetcher);
+        await loadModelCatalogWithFetcher("openai", secret, fetcher);
       } catch (error) {
         thrown = error;
       }
@@ -136,7 +143,7 @@ describe("model catalog", () => {
 
     let thrown: unknown;
     try {
-      await loadModelCatalog(
+      await loadModelCatalogWithFetcher(
         "openrouter",
         "catalog-synthetic-secret",
         fetcher,
@@ -159,7 +166,7 @@ describe("model catalog", () => {
 
     let thrown: unknown;
     try {
-      await loadModelCatalog(
+      await loadModelCatalogWithFetcher(
         "openai",
         "catalog-synthetic-secret",
         fetcher,
