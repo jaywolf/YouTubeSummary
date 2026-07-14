@@ -436,7 +436,7 @@ export class SummaryController {
       const snapshot: JobSnapshot = {
         requestId,
         tabId,
-        videoId: this.#preflight.get(tabId)?.videoId ?? "",
+        videoId: reservation.videoId,
         state: "canceled",
         progress: null,
         startedAt: reservation.startedAt

@@ -28,22 +28,53 @@ function transcriptExtractionError(cause: unknown): AppError {
   });
 }
 
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+}
+
+function awaitWithAbort<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return pending;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void pending.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
 export async function extractTranscriptWithContext(
   tabId: number,
   requestId: string,
   context: VideoContext,
-  preference: TranscriptPreference
+  preference: TranscriptPreference,
+  signal?: AbortSignal
 ): Promise<Transcript> {
   let response;
   try {
-    response = parseTranscriptResponse(await browser.tabs.sendMessage(tabId, {
-      type: "youtube/extract",
-      requestId,
-      tabId,
-      context,
-      preference
-    }));
+    response = parseTranscriptResponse(await awaitWithAbort(
+      browser.tabs.sendMessage(tabId, {
+        type: "youtube/extract",
+        requestId,
+        tabId,
+        context,
+        preference
+      }),
+      signal
+    ));
   } catch (error) {
+    if (signal?.aborted) throw abortReason(signal);
     throw transcriptExtractionError(error);
   }
   if ("code" in response) {
@@ -126,6 +157,24 @@ type MessageController = Pick<
   "start" | "cancel" | "status" | "navigated" | "clearSummaryCache"
 >;
 
+export type BackgroundFailureStage = "initialization" | "message";
+export type BackgroundFailureReporter = (
+  stage: BackgroundFailureStage,
+  error: unknown
+) => void;
+
+export const reportBackgroundFailure: BackgroundFailureReporter = (stage, _error) => {
+  // Never log thrown values: provider errors can contain credentials or response bodies.
+  console.error(`[YouTube Summary] Background ${stage} failed.`);
+};
+
+export function observeBackgroundReady(
+  ready: Promise<unknown>,
+  reportFailure: BackgroundFailureReporter = reportBackgroundFailure
+): void {
+  void ready.catch((error) => reportFailure("initialization", error));
+}
+
 function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender & {
   tab: { id: number; url?: string };
 } {
@@ -144,7 +193,8 @@ function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender 
 
 export function createBackgroundMessageListener(
   controller: MessageController,
-  ready: Promise<unknown> = Promise.resolve()
+  ready: Promise<unknown> = Promise.resolve(),
+  reportFailure: BackgroundFailureReporter = reportBackgroundFailure
 ) {
   return (
     value: unknown,
@@ -184,7 +234,10 @@ export function createBackgroundMessageListener(
     });
     void response.then(
       (result) => sendResponse(result),
-      () => sendResponse(null)
+      (error) => {
+        reportFailure("message", error);
+        sendResponse(null);
+      }
     );
     return true;
   };
@@ -196,8 +249,8 @@ export default defineBackground(() => {
     getTab: (tabId) => browser.tabs.get(tabId),
     readVideoContext: (tabId) => readVideoContextFromTab(tabId),
     loadSettings: () => browserSettingsRepository.load(),
-    extractTranscript: (tabId, requestId, context, preference) =>
-      extractTranscriptWithContext(tabId, requestId, context, preference),
+    extractTranscript: (tabId, requestId, context, preference, signal) =>
+      extractTranscriptWithContext(tabId, requestId, context, preference, signal),
     cancelTranscript: cancelTranscriptExtraction,
     summaryCache: browserSummaryCache,
     createProvider: (config) => createProvider(config),
@@ -219,7 +272,7 @@ export default defineBackground(() => {
     browser.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
     configurePanel()
   ]).then(() => controller.restoreInterruptedJobs());
-  void ready.catch(() => undefined);
+  observeBackgroundReady(ready);
 
   // MV3 listeners are registered during initial evaluation; work awaits trusted storage setup.
   browser.runtime.onMessage.addListener(createBackgroundMessageListener(controller, ready));

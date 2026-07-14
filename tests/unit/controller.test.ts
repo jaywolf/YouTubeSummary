@@ -560,7 +560,16 @@ describe("SummaryController", () => {
     const start = fixture.controller.start({ requestId: "preflight", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false });
     await vi.waitFor(() => expect(fixture.dependencies.getTab).toHaveBeenCalledOnce());
 
-    await expect(fixture.controller.cancel(4, "preflight")).resolves.toMatchObject({ state: "canceled" });
+    await expect(fixture.controller.cancel(4, "preflight")).resolves.toMatchObject({
+      state: "canceled",
+      videoId: "aaaaaaaaaaa"
+    });
+    expect(fixture.events).toContainEqual(expect.objectContaining({
+      type: "job/state",
+      requestId: "preflight",
+      tabId: 4,
+      state: "canceled"
+    }));
     tab.resolve({ id: 4, active: true, url: contextA.canonicalUrl });
     await expect(start).resolves.toMatchObject({ state: "canceled" });
     expect(fixture.dependencies.readVideoContext).not.toHaveBeenCalled();

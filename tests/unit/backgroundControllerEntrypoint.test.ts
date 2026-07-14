@@ -146,6 +146,48 @@ describe("background controller entrypoint", () => {
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith(snapshot));
   });
 
+  it("reports rejected message work without exposing it in the response", async () => {
+    const module = await importBackground();
+    const failure = new Error("private provider detail");
+    const controller = {
+      start: vi.fn(async () => { throw failure; }),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn()
+    };
+    const reportFailure = vi.fn();
+    const listener = module.createBackgroundMessageListener(
+      controller as never,
+      Promise.resolve(),
+      reportFailure
+    );
+    const sendResponse = vi.fn();
+
+    expect(listener({
+      type: "panel/start",
+      requestId: "start-failure",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    }, {}, sendResponse)).toBe(true);
+
+    await vi.waitFor(() => expect(reportFailure).toHaveBeenCalledWith("message", failure));
+    expect(sendResponse).toHaveBeenCalledWith(null);
+    expect(sendResponse).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining("private provider detail")
+    }));
+  });
+
+  it("observes startup rejection through the safe background reporter", async () => {
+    const module = await importBackground();
+    const failure = new Error("private startup detail");
+    const reportFailure = vi.fn();
+
+    module.observeBackgroundReady(Promise.reject(failure), reportFailure);
+
+    await vi.waitFor(() => expect(reportFailure).toHaveBeenCalledWith("initialization", failure));
+  });
+
   it("registers synchronously but waits for trusted-storage initialization before handling", async () => {
     const module = await importBackground();
     let markReady!: () => void;

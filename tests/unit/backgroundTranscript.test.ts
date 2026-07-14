@@ -31,7 +31,7 @@ const transcript = {
 };
 
 describe("background transcript bridge", () => {
-  let background: Record<string, (...args: never[]) => Promise<unknown>>;
+  let background: typeof import("../../entrypoints/background");
   let installedListener: (() => unknown) | undefined;
   const executeScript = vi.fn(async () => [{ frameId: 0, result: rawSnapshot }]);
   const sendMessage = vi.fn<() => Promise<unknown>>(async () => transcript);
@@ -60,7 +60,7 @@ describe("background transcript bridge", () => {
       },
       sidePanel: { setPanelBehavior }
     });
-    background = await import("../../entrypoints/background") as unknown as typeof background;
+    background = await import("../../entrypoints/background");
   });
 
   afterAll(() => {
@@ -68,10 +68,10 @@ describe("background transcript bridge", () => {
   });
 
   it("reads and sanitizes MAIN-world data before sending youtube/extract", async () => {
-    await expect(background.extractTranscriptFromTab?.(
-      9 as never,
-      "request-1" as never,
-      { preferredLanguage: null, browserLanguage: "en-US" } as never
+    await expect(background.extractTranscriptFromTab(
+      9,
+      "request-1",
+      { preferredLanguage: null, browserLanguage: "en-US" }
     )).resolves.toEqual({
       context: expect.objectContaining({ videoId: "abcdefghijk" }),
       transcript
@@ -102,7 +102,7 @@ describe("background transcript bridge", () => {
   });
 
   it("forwards explicit serializable cancellation", async () => {
-    await background.cancelTranscriptExtraction?.(9 as never, "request-1" as never);
+    await background.cancelTranscriptExtraction(9, "request-1");
 
     expect(sendMessage).toHaveBeenCalledWith(9, {
       type: "youtube/cancel-extract",
@@ -114,10 +114,10 @@ describe("background transcript bridge", () => {
   it("maps a MAIN-world execution failure to a safe extraction error", async () => {
     executeScript.mockRejectedValueOnce(new Error("private page failure"));
 
-    await expect(background.extractTranscriptFromTab?.(
-      9 as never,
-      "request-2" as never,
-      { preferredLanguage: null, browserLanguage: "en-US" } as never
+    await expect(background.extractTranscriptFromTab(
+      9,
+      "request-2",
+      { preferredLanguage: null, browserLanguage: "en-US" }
     )).rejects.toMatchObject({
       code: "transcript_extraction_failed",
       safeMessage: "The transcript could not be extracted."
@@ -127,13 +127,38 @@ describe("background transcript bridge", () => {
   it("maps an invalid content-script response to a safe extraction error", async () => {
     sendMessage.mockResolvedValueOnce({ privateData: "invalid response" });
 
-    await expect(background.extractTranscriptFromTab?.(
-      9 as never,
-      "request-3" as never,
-      { preferredLanguage: null, browserLanguage: "en-US" } as never
+    await expect(background.extractTranscriptFromTab(
+      9,
+      "request-3",
+      { preferredLanguage: null, browserLanguage: "en-US" }
     )).rejects.toMatchObject({
       code: "transcript_extraction_failed",
       safeMessage: "The transcript could not be extracted."
     });
+  });
+
+  it("stops awaiting the content bridge when the controller aborts", async () => {
+    sendMessage.mockImplementationOnce(() => new Promise((resolve) => {
+      setTimeout(() => resolve(transcript), 25);
+    }));
+    const controller = new AbortController();
+    const pending = background.extractTranscriptWithContext(
+      9,
+      "request-abort",
+      {
+        videoId: "abcdefghijk",
+        canonicalUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+        title: "Video",
+        channel: "Channel",
+        durationSeconds: 12,
+        captionTracks: [transcript.track]
+      },
+      { preferredLanguage: null, browserLanguage: "en-US" },
+      controller.signal
+    );
+
+    controller.abort();
+
+    await expect(pending).rejects.toBe(controller.signal.reason);
   });
 });
