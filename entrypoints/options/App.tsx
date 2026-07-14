@@ -5,7 +5,8 @@ import {
   parseSettings,
   validateCustomBaseUrl,
   type ExtensionSettings,
-  type ProviderConfig
+  type ProviderConfig,
+  type SummaryDetail
 } from "../../src/domain/settings";
 import {
   ensureCustomOriginPermission,
@@ -39,6 +40,7 @@ type SettingsForm = {
   apiKey: string;
   captionLanguage: string;
   outputLanguage: string;
+  summaryDetail: SummaryDetail;
   contextWindowTokens: string;
   cacheEnabled: boolean;
   disclosureAccepted: boolean;
@@ -76,6 +78,7 @@ function formFromSettings(settings: ExtensionSettings): SettingsForm {
     apiKey: "",
     captionLanguage: settings.captionLanguage ?? "",
     outputLanguage: settings.outputLanguage,
+    summaryDetail: settings.summaryDetail,
     contextWindowTokens: String(settings.contextWindowTokens),
     cacheEnabled: settings.cacheEnabled,
     disclosureAccepted: false,
@@ -374,6 +377,7 @@ export function App({
         provider,
         captionLanguage: form.captionLanguage.trim() || null,
         outputLanguage: form.outputLanguage,
+        summaryDetail: form.summaryDetail,
         contextWindowTokens: contextTokens,
         cacheEnabled: form.cacheEnabled
       });
@@ -711,6 +715,27 @@ export function App({
                   }))}
                 />
               </label>
+              <div className="field">
+                <label htmlFor="summary-detail">Summary detail</label>
+                <select
+                  id="summary-detail"
+                  aria-describedby="summary-detail-help"
+                  value={form.summaryDetail}
+                  onChange={(event) => setForm((current) => ({
+                    ...current,
+                    summaryDetail: event.target.value as SummaryDetail
+                  }))}
+                >
+                  <option value="concise">Concise</option>
+                  <option value="standard">Standard (default)</option>
+                  <option value="detailed">Detailed</option>
+                </select>
+                <small id="summary-detail-help">{form.summaryDetail === "concise"
+                  ? "A short overview, the most important takeaways, and only the major sections. Applies the next time a summary is generated."
+                  : form.summaryDetail === "detailed"
+                    ? "More granular coverage with important context, examples, and explanations. Applies the next time a summary is generated."
+                    : "Balanced coverage and context for most videos. Applies the next time a summary is generated."}</small>
+              </div>
               <label className="field">
                 <span>Context limit</span>
                 <input

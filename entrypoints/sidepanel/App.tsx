@@ -152,7 +152,7 @@ function copyText(result: CompletedSummaryPayload): string {
   for (const takeaway of result.summary.takeaways) {
     lines.push(`- ${takeaway.startSeconds === undefined ? "" : `[${formatTimestamp(takeaway.startSeconds)}] `}${takeaway.text}`);
   }
-  lines.push("", "Detailed breakdown");
+  lines.push("", "Video breakdown");
   for (const section of result.summary.sections) {
     lines.push("", `${section.heading} [${formatTimestamp(section.startSeconds)}]`, ...section.paragraphs);
   }
@@ -169,7 +169,7 @@ function phaseLabel(state: JobState, progress: PipelineProgress | null): string 
 }
 
 function progressLabel(progress: PipelineProgress | null): string {
-  if (progress === null) return "This can take a moment for detailed videos.";
+  if (progress === null) return "This can take a moment for longer videos.";
   if (progress.phase === "mapping") {
     const chunks = Math.max(1, progress.total - 1);
     return `Chunk ${Math.min(progress.completed + 1, chunks)} of ${chunks}`;
@@ -515,7 +515,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       </section>
 
       <section className="summary-section" aria-labelledby="breakdown-heading">
-        <h2 id="breakdown-heading">Detailed breakdown</h2>
+        <h2 id="breakdown-heading">Video breakdown</h2>
         {result.summary.sections.map((section, index) => (
           <article className="topic" key={index}>
             <div className="topic-heading">

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 22+, pnpm 11.13.0, TypeScript 7.0.2, WXT 0.20.27, React 19.2.7, Zod 4.4.3, Vitest 4.1.10, Testing Library 16.3.2, and Playwright 1.61.1.
 
-**Implementation status (2026-07-14):** The plan has been implemented on `feature/ytsummary-extension`. Its step checkboxes are preserved as the approved execution record rather than live completion claims; current build and manual-browser evidence lives in `README.md` and `docs/manual-verification.md`. The implemented settings UX improves the original plan by loading OpenAI and OpenRouter model IDs from their authenticated APIs instead of shipping or requiring a static/manual ID list.
+**Implementation status (2026-07-14):** The plan has been implemented on `feature/ytsummary-extension`. Its step checkboxes are preserved as the approved execution record rather than live completion claims; current build and manual-browser evidence lives in `README.md` and `docs/manual-verification.md`. The implemented settings UX improves the original plan by loading OpenAI and OpenRouter model IDs from their authenticated APIs instead of shipping or requiring a static/manual ID list, and adds a persisted Concise/Standard/Detailed summary-detail preference with cache-safe prompt behavior.
 
 ## Global Constraints
 

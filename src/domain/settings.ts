@@ -5,10 +5,13 @@ export type ProviderConfig =
   | { kind: "openrouter"; apiKey: string; model: string }
   | { kind: "custom"; apiKey: string; model: string; baseUrl: string };
 
+export type SummaryDetail = "concise" | "standard" | "detailed";
+
 export type ExtensionSettings = {
   provider: ProviderConfig | null;
   captionLanguage: string | null;
   outputLanguage: string;
+  summaryDetail: SummaryDetail;
   contextWindowTokens: number;
   cacheEnabled: boolean;
 };
@@ -26,6 +29,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   provider: null,
   captionLanguage: null,
   outputLanguage: "Same as transcript",
+  summaryDetail: "standard",
   contextWindowTokens: 128_000,
   cacheEnabled: true
 };
@@ -101,6 +105,8 @@ export const settingsSchema = z.object({
   provider: providerSchema.nullable().default(null),
   captionLanguage: z.string().trim().min(1).nullable().default(null),
   outputLanguage: z.string().trim().min(1).default(DEFAULT_SETTINGS.outputLanguage),
+  summaryDetail: z.enum(["concise", "standard", "detailed"])
+    .default(DEFAULT_SETTINGS.summaryDetail),
   contextWindowTokens: z.number().int().min(8_192).max(1_000_000)
     .default(DEFAULT_SETTINGS.contextWindowTokens),
   cacheEnabled: z.boolean().default(DEFAULT_SETTINGS.cacheEnabled)

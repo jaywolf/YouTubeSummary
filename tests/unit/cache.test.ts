@@ -25,6 +25,7 @@ function keyInput(overrides: Partial<CacheKeyInput> = {}): CacheKeyInput {
     autoCaption: false,
     provider: { kind: "openai", apiKey: "secret-a", model: "gpt-test" },
     outputLanguage: "English",
+    summaryDetail: "standard",
     promptVersion: "v1",
     schemaVersion: SUMMARY_SCHEMA_VERSION,
     ...overrides
@@ -92,6 +93,7 @@ describe("summary cache identity", () => {
       keyInput({ provider: { kind: "openrouter", apiKey: "secret-a", model: "gpt-test" } }),
       keyInput({ provider: { kind: "openai", apiKey: "secret-a", model: "other-model" } }),
       keyInput({ outputLanguage: "French" }),
+      keyInput({ summaryDetail: "concise" }),
       keyInput({ promptVersion: "v2" }),
       keyInput({ schemaVersion: 2 })
     ];

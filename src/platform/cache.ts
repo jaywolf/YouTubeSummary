@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ProviderConfig } from "../domain/settings";
+import type { ProviderConfig, SummaryDetail } from "../domain/settings";
 import { videoSummarySchema, type VideoSummary } from "../domain/summary";
 import { SUMMARY_CACHE_STORAGE_KEY, type StorageAreaAdapter } from "./storage";
 
@@ -12,6 +12,7 @@ export type CacheKeyInput = {
   autoCaption: boolean;
   provider: ProviderConfig;
   outputLanguage: string;
+  summaryDetail: SummaryDetail;
   promptVersion: string;
   schemaVersion: number;
 };
@@ -119,6 +120,7 @@ export async function buildCacheKey(input: CacheKeyInput): Promise<string> {
     providerOrigin: provider.origin,
     model: provider.model,
     outputLanguage: input.outputLanguage,
+    summaryDetail: input.summaryDetail,
     promptVersion: input.promptVersion,
     schemaVersion: input.schemaVersion
   });

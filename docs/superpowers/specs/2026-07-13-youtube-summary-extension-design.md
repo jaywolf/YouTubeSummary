@@ -44,7 +44,7 @@ The side panel follows the supplied reference: dark, calm, reading-focused, and 
 3. The native side panel opens.
 4. If no provider is configured, the panel shows a short setup explanation and an **Open settings** action.
 5. If configuration is valid, the extension identifies the video and obtains its preferred caption track.
-6. A cached summary is shown immediately when its cache key matches the current video, caption language, provider, model, output-language setting, and prompt version.
+6. A cached summary is shown immediately when its cache key matches the current video, caption language, provider, model, output-language setting, summary-detail setting, and prompt version.
 7. Otherwise, summarization starts automatically. The panel reports transcript extraction, chunk progress for long videos, and synthesis progress.
 8. The final summary renders as safe structured content with timestamp links that seek the active YouTube player.
 
@@ -62,9 +62,9 @@ The side panel follows the supplied reference: dark, calm, reading-focused, and 
 
 The rendered result contains:
 
-1. A two-to-four paragraph overview.
-2. Five to ten key takeaways.
-3. A detailed topical breakdown ordered by the video's chronology.
+1. An overview whose length follows the selected **Concise**, **Standard**, or **Detailed** preference.
+2. Key takeaways targeted at 3–5 for Concise, 5–10 for Standard, and 8–12 for Detailed when supported by the captions.
+3. A chronological topical breakdown limited to major sections for Concise and expanded to comprehensive meaningful coverage for Detailed.
 4. Timestamp links for each topical section and for important supporting points when the transcript provides useful timing.
 5. A short note that the summary was generated from captions and may inherit caption errors.
 
@@ -79,7 +79,7 @@ Use WXT with React and TypeScript to generate a Manifest V3 extension. WXT owns 
 | Context | Responsibility |
 | --- | --- |
 | Side panel | Render current state, initiate or cancel summarization, stream progress, copy output, open settings, and send timestamp seek commands. |
-| Options page | Configure provider, API key, API-backed model selection, custom base URL, caption preference, output language, and cache behavior; test the selected provider; clear credentials and cached summaries. |
+| Options page | Configure provider, API key, API-backed model selection, custom base URL, caption preference, output language, summary detail, and cache behavior; test the selected provider; clear credentials and cached summaries. |
 | Background service worker | Orchestrate jobs, enforce one active job per tab, call providers, manage cancellation, perform caching, map errors, and keep API keys out of the YouTube page context. |
 | YouTube content script | Validate the page, report video metadata, request sanitized caption-track data from the page context, extract the visible transcript as fallback, and seek the player to a timestamp. It never reads provider credentials. |
 | Main-world bridge | Read the minimum player response needed to identify caption tracks and return a sanitized serializable object. It does not retain state, call providers, or expose extension data to the page. |
@@ -163,7 +163,8 @@ The prompt instructs the model to:
 - return structured JSON matching the extension's provider-neutral summary schema;
 - use timestamps drawn from supplied segment boundaries;
 - paraphrase rather than fabricate direct quotes;
-- produce the configured output language.
+- produce the configured output language; and
+- target the configured Concise, Standard, or Detailed level in both direct and long-video final synthesis prompts.
 
 ### 7.2 Summary schema
 
@@ -258,6 +259,7 @@ Persist:
 - validated custom base URL;
 - caption preference;
 - output language;
+- summary-detail preference;
 - model context-limit setting;
 - cache preference and bounded summary cache;
 - non-secret schema and prompt versions.
@@ -300,6 +302,7 @@ Cache only completed validated summaries. The cache key includes:
 - provider base-origin identifier for custom endpoints, excluding credentials;
 - model ID;
 - output language;
+- summary-detail preference;
 - prompt version;
 - summary schema version.
 

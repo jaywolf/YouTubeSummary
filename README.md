@@ -81,8 +81,9 @@ The extension appends `/chat/completions` to the saved base URL. The URL must us
 
 - **Caption preference:** Leave blank for automatic selection, or enter a preferred caption language code. The selector prefers matching human-authored captions before automatic captions, then browser-language, English, and other available tracks.
 - **Output language:** Defaults to `Same as transcript` and is passed to the provider as an output instruction.
+- **Summary detail:** Defaults to **Standard**. **Concise** prioritizes the most important points; Standard provides balanced coverage and context; **Detailed** asks for more granular context and explanation. The preference applies the next time a summary is generated.
 - **Context limit:** Defaults to a conservative, user-adjustable 128,000 tokens. Valid values are 8,192 through 1,000,000. Set this to a limit your chosen model actually supports. Transcripts that do not fit are summarized in sequential chunks and synthesized into a final result.
-- **Cache summaries:** Enabled by default. Completed summaries are reused only when the video, selected captions, provider identity, model, output language, prompt version, and schema version match.
+- **Cache summaries:** Enabled by default. Completed summaries are reused only when the video, selected captions, provider identity, model, output language, summary detail, prompt version, and schema version match.
 
 The cache holds at most 20 entries and 5,000,000 serialized bytes, evicting older entries as needed. **Regenerate** bypasses a cache read and replaces the matching cached result after successful generation. Turning caching off stops cache reads and writes but does not delete existing entries; use **Clear summaries** in Settings to erase them.
 

@@ -532,6 +532,7 @@ describe("side panel", () => {
     render(<App client={fixture.client} />);
 
     expect(await screen.findByText("<img src=x onerror=alert(1)>")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Video breakdown" })).toBeTruthy();
     expect(fixture.sendRuntimeMessage.mock.calls.filter(([message]) =>
       message.type === "panel/start")).toHaveLength(0);
     expect(document.querySelector("img")).toBeNull();
@@ -539,8 +540,24 @@ describe("side panel", () => {
     expect(fixture.client.writeClipboard).toHaveBeenCalledOnce();
     const copied = String((fixture.client.writeClipboard as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
     expect(copied).toContain("Hostile video");
+    expect(copied).toContain("Video breakdown");
+    expect(copied).not.toContain("Detailed breakdown");
     expect(copied).toContain("<img src=x onerror=alert(1)>");
     expect(copied).not.toContain("<section");
+  });
+
+  it("uses length-neutral copy before detailed progress is available", async () => {
+    const fixture = setup({
+      requestId: "pending-progress",
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "summarizing",
+      progress: null,
+      startedAt: 1
+    });
+    render(<App client={fixture.client} />);
+
+    expect(await screen.findByText("This can take a moment for longer videos.")).toBeTruthy();
   });
 
   it("keeps Copy available and handles clipboard rejection", async () => {

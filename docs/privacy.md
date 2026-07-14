@@ -18,6 +18,7 @@ The complete settings record contains:
 - the validated custom base URL for a custom provider;
 - preferred caption language, or automatic selection;
 - output-language instruction;
+- summary-detail preference (`concise`, `standard`, or `detailed`), defaulting to `standard`;
 - user-adjustable model context limit, defaulting to 128,000 tokens; and
 - whether summary caching is enabled.
 
@@ -27,7 +28,7 @@ Keys are saved only after the user accepts the local-key disclosure. The setting
 
 When caching is enabled, each completed cache entry contains:
 
-- a SHA-256 cache-key digest derived from video ID, caption language and automatic-caption status, provider kind, custom-provider origin when applicable, model ID, output language, prompt version, and summary schema version;
+- a SHA-256 cache-key digest derived from video ID, caption language and automatic-caption status, provider kind, custom-provider origin when applicable, model ID, output language, summary detail, prompt version, and summary schema version;
 - the validated structured summary: overview paragraphs, takeaway text and optional start times, chronological section headings/start times/paragraphs, schema version, the fixed caption limitation, and generation time;
 - cache creation and last-access times; and
 - the entry's serialized-byte measurement.
@@ -55,7 +56,7 @@ Summary requests send only to the provider selected in Settings:
 - system instructions and the required structured-output schema;
 - video title, channel name when available, and video ID;
 - caption text with segment start times and durations, either in one request or sequential chunks; and
-- the output-language instruction.
+- the output-language instruction and selected summary-detail instruction.
 
 For a long video, later requests may send validated intermediate chunk summaries instead of the original transcript chunks. If a provider returns malformed structured output, one repair request may send that provider's invalid output back to the same selected provider. **Test connection** sends only a small synthetic prompt and schema; it does not send video metadata or a transcript.
 
@@ -89,7 +90,7 @@ The extension does not request blanket all-site access at runtime. After validat
 Open the extension's **Settings** page:
 
 - **Clear saved provider** confirms the action, then removes the entire provider configuration, including provider kind, API key, model ID, and custom base URL. It preserves summary preferences and cached summaries. **Cancel replacement** discards only an unsaved replacement draft and keeps the saved provider.
-- **Reset stored settings** removes the provider and restores caption selection, output language, context limit, and cache preference to defaults. It does not clear cached summaries.
+- **Reset stored settings** removes the provider and restores caption selection, output language, summary detail, context limit, and cache preference to defaults. It does not clear cached summaries.
 - **Clear summaries** replaces the local cache with an empty cache. Turning **Cache summaries** off prevents cache reads and writes but does not erase entries already stored.
 
 Clearing a custom provider does not revoke a host permission already granted to that origin. Revoke it from the browser's extension site-access controls if desired. Removing the extension from the browser removes its extension storage and granted permissions from that browser profile.

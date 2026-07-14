@@ -103,6 +103,42 @@ async function fillCustomCredential(baseUrl: string) {
 }
 
 describe("options settings", () => {
+  it("defaults Summary detail to Standard and saves a concise preference", async () => {
+    const repository = memoryRepository();
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    const detail = await screen.findByRole("combobox", { name: "Summary detail" });
+    expect((detail as HTMLSelectElement).value).toBe("standard");
+    expect(screen.getByRole("option", { name: "Concise" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Standard (default)" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Detailed" })).toBeTruthy();
+    expect(screen.getByText(/Balanced coverage and context for most videos/)).toBeTruthy();
+    expect(detail.getAttribute("aria-describedby")).toBe("summary-detail-help");
+
+    await userEvent.selectOptions(detail, "concise");
+    expect(screen.getByText(/A short overview, the most important takeaways/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(repository.saved.at(-1)?.summaryDetail).toBe("concise");
+  });
+
+  it("loads Detailed and does not make provider connection settings dirty", async () => {
+    const repository = memoryRepository(parseSettings({
+      provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "saved-model" },
+      summaryDetail: "detailed"
+    }));
+    render(<App settingsRepository={repository} permissions={permissions()} />);
+
+    const detail = await screen.findByRole("combobox", { name: "Summary detail" });
+    expect((detail as HTMLSelectElement).value).toBe("detailed");
+    expect(screen.getByText(/More granular coverage with important context/)).toBeTruthy();
+    const testConnection = screen.getByRole("button", { name: "Test connection" });
+    expect((testConnection as HTMLButtonElement).disabled).toBe(false);
+
+    await userEvent.selectOptions(detail, "concise");
+    expect((testConnection as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("loads built-in models with a new key only after BYOK disclosure", async () => {
     const repository = memoryRepository();
     const loader = catalogLoader([

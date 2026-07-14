@@ -136,7 +136,8 @@ export async function runSummaryPipeline({
   const finalTranscriptPrompt = buildSummaryPrompt({
     video,
     transcript: transcript.segments,
-    outputLanguage: settings.outputLanguage
+    outputLanguage: settings.outputLanguage,
+    summaryDetail: settings.summaryDetail
   });
 
   if (promptFits(finalTranscriptPrompt, maximumInput)) {
@@ -164,7 +165,8 @@ export async function runSummaryPipeline({
   const chunkPrompts = chunks.map((chunk) => buildChunkPrompt({
     video,
     transcript: chunk,
-    outputLanguage: settings.outputLanguage
+    outputLanguage: settings.outputLanguage,
+    summaryDetail: settings.summaryDetail
   }));
   // Preflight the complete set so an oversized later singleton cannot incur earlier calls.
   for (const prompt of chunkPrompts) assertPromptFits(prompt, maximumInput);
@@ -190,6 +192,7 @@ export async function runSummaryPipeline({
     video,
     summaries: current,
     outputLanguage: settings.outputLanguage,
+    summaryDetail: settings.summaryDetail,
     final: true
   });
 
@@ -207,6 +210,7 @@ export async function runSummaryPipeline({
       video,
       summaries: group,
       outputLanguage: settings.outputLanguage,
+      summaryDetail: settings.summaryDetail,
       final: false
     }));
     for (const prompt of prompts) assertPromptFits(prompt, maximumInput);
@@ -238,6 +242,7 @@ export async function runSummaryPipeline({
       video,
       summaries: current,
       outputLanguage: settings.outputLanguage,
+      summaryDetail: settings.summaryDetail,
       final: true
     });
   }

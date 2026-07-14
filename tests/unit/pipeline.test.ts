@@ -78,7 +78,8 @@ function contextForThreeChunks(segments: TranscriptSegment[]): number {
     const prompt = buildSummaryPrompt({
       video,
       transcript: segments,
-      outputLanguage: DEFAULT_SETTINGS.outputLanguage
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail: DEFAULT_SETTINGS.summaryDetail
     });
     const maxInput = Math.floor(context * 0.85) - OUTPUT_RESERVE_TOKENS;
     if (chunkTranscript(segments, budget).length === 3
@@ -105,17 +106,20 @@ describe("summary prompts", () => {
     ["final summary", () => buildSummaryPrompt({
       video,
       transcript: [segment(0)],
-      outputLanguage: DEFAULT_SETTINGS.outputLanguage
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail: DEFAULT_SETTINGS.summaryDetail
     })],
     ["chunk summary", () => buildChunkPrompt({
       video,
       transcript: [segment(0)],
-      outputLanguage: DEFAULT_SETTINGS.outputLanguage
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail: DEFAULT_SETTINGS.summaryDetail
     })],
     ["synthesis summary", () => buildSynthesisPrompt({
       video,
       summaries: [intermediate(0)],
       outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail: DEFAULT_SETTINGS.summaryDetail,
       final: true
     })]
   ])("explicitly requires single-line strings in the %s prompt", (_name, buildPrompt) => {
@@ -123,7 +127,56 @@ describe("summary prompts", () => {
   });
 
   it("increments the prompt version when output constraints change", () => {
-    expect(PROMPT_VERSION).toBe("v2");
+    expect(PROMPT_VERSION).toBe("v3");
+  });
+
+  it.each([
+    ["concise", "Keep the final summary concise"],
+    ["standard", "Use balanced detail for the final summary"],
+    ["detailed", "Create a comprehensive final summary"]
+  ] as const)("applies the %s detail level to final summary prompts", (summaryDetail, expected) => {
+    const direct = buildSummaryPrompt({
+      video,
+      transcript: [segment(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail
+    });
+    const synthesized = buildSynthesisPrompt({
+      video,
+      summaries: [intermediate(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail,
+      final: true
+    });
+
+    expect(direct.system).toContain(expected);
+    expect(synthesized.system).toContain(expected);
+  });
+
+  it.each([
+    ["concise", "Retain only the most important distinct facts"],
+    ["standard", "Retain the main distinct facts"],
+    ["detailed", "Retain granular facts, examples, reasoning, distinctions"]
+  ] as const)("applies the %s detail level to long-video intermediate prompts", (
+    summaryDetail,
+    expected
+  ) => {
+    const chunk = buildChunkPrompt({
+      video,
+      transcript: [segment(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail
+    });
+    const reduction = buildSynthesisPrompt({
+      video,
+      summaries: [intermediate(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail,
+      final: false
+    });
+
+    expect(chunk.system).toContain(expected);
+    expect(reduction.system).toContain(expected);
   });
 });
 
@@ -165,7 +218,8 @@ describe("runSummaryPipeline", () => {
     const prompt = buildSummaryPrompt({
       video,
       transcript: input.segments,
-      outputLanguage: DEFAULT_SETTINGS.outputLanguage
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      summaryDetail: DEFAULT_SETTINGS.summaryDetail
     });
     const promptTokens = estimateTokens(serializePrompt(prompt));
     let exactContext = 8_192;

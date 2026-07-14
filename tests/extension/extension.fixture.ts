@@ -73,7 +73,7 @@ export async function configureProvider(
   const permissionBefore = await options.evaluate(() => chrome.permissions.contains({
     origins: ["http://127.0.0.1/*"]
   }));
-  await options.locator("select").selectOption("custom");
+  await options.getByRole("combobox", { name: "Provider" }).selectOption("custom");
   await options.getByLabel("Base URL").fill(server.providerBaseUrl);
   await options.getByLabel("Model ID").fill("synthetic-model");
   await options.getByLabel("API key").fill("synthetic-key");

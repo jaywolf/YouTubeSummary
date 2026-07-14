@@ -373,6 +373,48 @@ describe("SummaryController", () => {
     );
   });
 
+  it("passes summary detail to the pipeline and uses it to isolate cache identity", async () => {
+    const concise = setup({
+      loadSettings: vi.fn(async (): Promise<ExtensionSettings> => ({
+        ...configured(),
+        summaryDetail: "concise"
+      }))
+    });
+    const detailed = setup({
+      loadSettings: vi.fn(async (): Promise<ExtensionSettings> => ({
+        ...configured(),
+        summaryDetail: "detailed"
+      }))
+    });
+
+    await concise.controller.start({
+      requestId: "concise-detail",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    });
+    await detailed.controller.start({
+      requestId: "detailed-detail",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    });
+
+    expect(concise.dependencies.runPipeline).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ summaryDetail: "concise" })
+    }));
+    expect(detailed.dependencies.runPipeline).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ summaryDetail: "detailed" })
+    }));
+    const conciseKey = (concise.dependencies.summaryCache?.get as ReturnType<typeof vi.fn>)
+      .mock.calls[0]?.[0];
+    const detailedKey = (detailed.dependencies.summaryCache?.get as ReturnType<typeof vi.fn>)
+      .mock.calls[0]?.[0];
+    expect(conciseKey).toMatch(/^[a-f0-9]{64}$/);
+    expect(detailedKey).toMatch(/^[a-f0-9]{64}$/);
+    expect(detailedKey).not.toBe(conciseKey);
+  });
+
   it("treats an invalid cached summary as a miss and regenerates it", async () => {
     const fixture = setup({
       summaryCache: {

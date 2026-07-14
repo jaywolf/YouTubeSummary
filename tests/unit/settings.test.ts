@@ -45,6 +45,14 @@ describe("provider settings", () => {
     });
   });
 
+  it("defaults legacy settings to standard detail and accepts every supported level", () => {
+    expect(parseSettings({}).summaryDetail).toBe("standard");
+    expect(parseSettings({ summaryDetail: "concise" }).summaryDetail).toBe("concise");
+    expect(parseSettings({ summaryDetail: "standard" }).summaryDetail).toBe("standard");
+    expect(parseSettings({ summaryDetail: "detailed" }).summaryDetail).toBe("detailed");
+    expect(() => parseSettings({ summaryDetail: "maximum" })).toThrow();
+  });
+
   it("constrains context limits and requires nonempty credentials", () => {
     expect(() => parseSettings({ contextWindowTokens: 8191 })).toThrow();
     expect(() => parseSettings({ contextWindowTokens: 1_000_001 })).toThrow();
@@ -112,13 +120,35 @@ describe("settings storage", () => {
   it("validates full settings on save and removes credentials explicitly", async () => {
     const storage = memoryStorage();
     const settings = parseSettings({
-      provider: { kind: "openrouter", apiKey: "synthetic-key", model: "test/model" }
+      provider: { kind: "openrouter", apiKey: "synthetic-key", model: "test/model" },
+      summaryDetail: "detailed"
     });
 
     await saveSettings(settings, storage);
     await expect(loadSettings(storage)).resolves.toEqual(settings);
     await clearCredentials(storage);
     await expect(loadSettings(storage)).resolves.toEqual({ ...settings, provider: null });
+  });
+
+  it("loads a legacy settings record without losing its saved preferences", async () => {
+    const storage = memoryStorage({
+      [SETTINGS_STORAGE_KEY]: {
+        provider: { kind: "openai", apiKey: "legacy-synthetic-key", model: "legacy-model" },
+        captionLanguage: "fr",
+        outputLanguage: "French",
+        contextWindowTokens: 256_000,
+        cacheEnabled: false
+      }
+    });
+
+    await expect(loadSettings(storage)).resolves.toEqual({
+      provider: { kind: "openai", apiKey: "legacy-synthetic-key", model: "legacy-model" },
+      captionLanguage: "fr",
+      outputLanguage: "French",
+      summaryDetail: "standard",
+      contextWindowTokens: 256_000,
+      cacheEnabled: false
+    });
   });
 
   it("deliberately resets malformed stored settings to safe defaults", async () => {
