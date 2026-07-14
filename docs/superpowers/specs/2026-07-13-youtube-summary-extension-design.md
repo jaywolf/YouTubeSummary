@@ -1,7 +1,7 @@
 # YouTube Summary Extension Design
 
 **Date:** 2026-07-13  
-**Status:** Approved architecture, pending written-spec review  
+**Status:** Approved by the user on 2026-07-13
 **Target:** Google Chrome 114+ and current Brave releases with Chromium extension compatibility
 
 ## 1. Product Summary

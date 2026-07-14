@@ -1,0 +1,4 @@
+.env
+.pi/
+node_modules/
+docs/reviews/
