@@ -497,7 +497,16 @@ Expected: PASS for timed-text, DOM fallback, malformed XML, empty segments, and 
 
 - [ ] **Step 5: Implement the sanitized player snapshot and ordered extraction**
 
-playerSnapshot.ts exports a self-contained readPlayerSnapshotInPage function that reads document.querySelector("#movie_player"), calls getPlayerResponse only when it is a function, and returns a plain object containing videoDetails plus captions.playerCaptionsTracklistRenderer.captionTracks. The background calls it with browser.scripting.executeScript using world MAIN and the active tab ID. sanitizePlayerSnapshot validates the returned unknown object in the trusted context and maps it into VideoContext; reject caption base URLs whose origin is not https://www.youtube.com.
+playerSnapshot.ts exports a self-contained readPlayerSnapshotInPage function that reads document.querySelector("#movie_player"), calls getPlayerResponse only when it is a function, and returns a plain object containing videoDetails plus captions.playerCaptionsTracklistRenderer.captionTracks. The background calls it with browser.scripting.executeScript using world MAIN and the active tab ID. sanitizePlayerSnapshot validates the returned unknown object in the trusted context and maps it into VideoContext. It receives a trusted build-time testMode boolean and accepts caption URLs only through this policy:
+
+~~~ts
+export function isAllowedCaptionUrl(url: URL, testMode: boolean): boolean {
+  if (url.origin === "https://www.youtube.com") return true;
+  return testMode && url.protocol === "http:" && url.hostname === "127.0.0.1";
+}
+~~~
+
+All callers pass import.meta.env.WXT_TEST_MODE === "1", which WXT replaces at build time and which resolves to false in production; page data can never enable the test path. Add sanitizer tests proving production mode rejects loopback URLs, test mode accepts only http://127.0.0.1 on an arbitrary fixture port, and test mode still rejects localhost, external HTTP, and non-YouTube HTTPS origins.
 
 extractTranscript receives injected dependencies:
 
@@ -621,7 +630,9 @@ permissions.ts exports:
 ~~~ts
 export function customOriginPattern(baseUrl: string): string {
   const url = new URL(validateCustomBaseUrl(baseUrl));
-  return url.origin + "/*";
+  if (url.protocol === "http:" && url.hostname === "localhost") return "http://localhost/*";
+  if (url.protocol === "http:" && url.hostname === "127.0.0.1") return "http://127.0.0.1/*";
+  return url.protocol + "//" + url.hostname + "/*";
 }
 
 export async function ensureCustomOriginPermission(
@@ -630,7 +641,7 @@ export async function ensureCustomOriginPermission(
 ): Promise<boolean>;
 ~~~
 
-contains runs first; request is called only for the derived origin pattern.
+Chrome match patterns do not contain ports, so the derived pattern intentionally covers the validated scheme and host across ports. Add unit cases for http://localhost:11434/v1 -> http://localhost/*, http://127.0.0.1:8080/v1 -> http://127.0.0.1/*, and https://llm.example:8443/v1 -> https://llm.example/*. contains runs first; request is called only for the exact derived origin pattern.
 
 - [ ] **Step 4: Write the settings component test**
 
@@ -1130,9 +1141,9 @@ export default defineContentScript({
 });
 ~~~
 
-WXT imports entrypoints at build time to generate content-script manifest entries and exposes WXT_-prefixed environment variables through import.meta.env. The fixture page implements #movie_player.getPlayerResponse(), a video element, title/channel metadata, and a caption base URL served by the mock server. Production builds contain neither the localhost match nor test bridge allowance.
+WXT imports entrypoints at build time to generate content-script manifest entries and exposes WXT_-prefixed environment variables through import.meta.env. The fixture page implements #movie_player.getPlayerResponse(), a video element, title/channel metadata, and a caption base URL served by the mock server. Its loopback caption URL is accepted only by the build-time-gated isAllowedCaptionUrl policy from Task 2. Production builds contain neither the localhost match nor test bridge allowance.
 
-Add a manifest test that runs both builds and asserts localhost appears only in the test manifest.
+Add a manifest test that runs the production build and immediately asserts no loopback content match, host permission, or test bridge is present; then run the test build and immediately assert the 127.0.0.1 content match and bridge are present. Add a packaged extraction assertion proving the loopback fixture transcript succeeds in test mode. The production sanitizer unit test remains the regression gate that the same URL is rejected when testMode is false.
 
 - [ ] **Step 3: Test the packaged uncached, cached, cancellation, and permission flows**
 
