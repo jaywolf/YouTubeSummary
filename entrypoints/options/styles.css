@@ -198,6 +198,52 @@ form {
   color: #ff9c91;
 }
 
+.model-picker {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #2f3037;
+  border-radius: 12px;
+  background: rgba(11, 12, 15, 0.48);
+}
+
+.model-status {
+  color: #96938d;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.model-error {
+  color: #ff9c91;
+}
+
+.model-actions,
+.advanced-model-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.model-actions {
+  justify-content: space-between;
+}
+
+.advanced-model-toggle {
+  color: #bbb8b1;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.advanced-model-toggle input {
+  accent-color: #8f7cff;
+}
+
+.compact {
+  flex: none;
+  padding: 7px 10px;
+  font-size: 0.78rem;
+}
+
 .disclosure,
 .toggle-row {
   display: flex;
@@ -341,7 +387,8 @@ button:disabled {
   }
 
   .credential-status,
-  .test-connection {
+  .test-connection,
+  .model-actions {
     align-items: flex-start;
     flex-direction: column;
   }

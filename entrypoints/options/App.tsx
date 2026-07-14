@@ -16,6 +16,12 @@ import {
   type SettingsRepository
 } from "../../src/platform/storage";
 import { createProvider } from "../../src/providers/factory";
+import {
+  loadModelCatalog,
+  type CatalogProvider,
+  type ModelCatalogEntry,
+  type ModelCatalogLoader
+} from "../../src/providers/modelCatalog";
 
 const DISCLOSURE = "This local BYOK extension stores the key on this device. Browser storage is not a secure vault. Use a dedicated restricted key and set provider spending limits.";
 
@@ -43,7 +49,13 @@ type AppProps = {
   settingsRepository?: SettingsRepository;
   permissions?: PermissionsAdapter;
   clearSummaries?: () => Promise<void>;
+  modelCatalogLoader?: ModelCatalogLoader;
 };
+
+type CatalogState = "idle" | "loading" | "ready" | "error";
+
+const browserModelCatalogLoader: ModelCatalogLoader = (provider, apiKey, signal) =>
+  loadModelCatalog(provider, apiKey, fetch, signal);
 
 async function clearBrowserSummaries(): Promise<void> {
   const response: unknown = await browser.runtime.sendMessage({
@@ -172,7 +184,8 @@ function CredentialControls({
 export function App({
   settingsRepository = browserSettingsRepository,
   permissions = browserPermissionsAdapter,
-  clearSummaries = clearBrowserSummaries
+  clearSummaries = clearBrowserSummaries,
+  modelCatalogLoader = browserModelCatalogLoader
 }: AppProps) {
   const [savedSettings, setSavedSettings] = useState<ExtensionSettings | null>(null);
   const [form, setForm] = useState<SettingsForm>(() => formFromSettings(DEFAULT_SETTINGS));
@@ -183,7 +196,12 @@ export function App({
   const [clearingSummaries, setClearingSummaries] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [catalogState, setCatalogState] = useState<CatalogState>("idle");
+  const [manualModel, setManualModel] = useState(false);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const connectionAbortRef = useRef<AbortController | null>(null);
+  const catalogAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -202,14 +220,27 @@ export function App({
     return () => {
       active = false;
       connectionAbortRef.current?.abort();
+      catalogAbortRef.current?.abort();
     };
   }, [settingsRepository]);
 
   const savedProvider = savedSettings?.provider ?? null;
   const hasSavedKey = credentialDestinationMatches(form, savedProvider);
   const needsKey = form.providerKind !== "none" && (!hasSavedKey || form.replacingKey);
+  const catalogProvider: CatalogProvider | null = form.providerKind === "openai"
+    || form.providerKind === "openrouter"
+    ? form.providerKind
+    : null;
+  const catalogCredential = catalogProvider === null
+    ? null
+    : !needsKey && savedProvider?.kind === catalogProvider
+      ? savedProvider.apiKey
+      : form.disclosureAccepted && form.apiKey.trim().length > 0
+        ? form.apiKey.trim()
+        : null;
   const providerRemovalPending = savedProvider !== null && form.providerKind === "none";
   const providerFieldsAreSaved = providerFormMatchesSaved(form, savedProvider);
+  const catalogIncludesModel = catalog.some((model) => model.id === form.model);
   const baseUrlError = form.providerKind === "custom" ? customUrlError(form.baseUrl) : null;
   const contextTokens = Number(form.contextWindowTokens);
   const contextIsValid = Number.isInteger(contextTokens)
@@ -228,6 +259,41 @@ export function App({
     && contextIsValid
     && form.outputLanguage.trim().length > 0;
 
+  useEffect(() => {
+    catalogAbortRef.current?.abort();
+    catalogAbortRef.current = null;
+
+    if (loading || catalogProvider === null || catalogCredential === null) {
+      setCatalog([]);
+      setCatalogState("idle");
+      return;
+    }
+
+    const controller = new AbortController();
+    catalogAbortRef.current = controller;
+    setCatalog([]);
+    setCatalogState("loading");
+    void modelCatalogLoader(catalogProvider, catalogCredential, controller.signal).then((models) => {
+      if (controller.signal.aborted) return;
+      setCatalog(models);
+      setCatalogState("ready");
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setCatalog([]);
+      setCatalogState("error");
+    }).finally(() => {
+      if (catalogAbortRef.current === controller) catalogAbortRef.current = null;
+    });
+
+    return () => controller.abort();
+  }, [
+    catalogCredential,
+    catalogProvider,
+    catalogRevision,
+    loading,
+    modelCatalogLoader
+  ]);
+
   function cancelConnectionTest() {
     connectionAbortRef.current?.abort();
     connectionAbortRef.current = null;
@@ -238,6 +304,7 @@ export function App({
 
   function selectProvider(providerKind: ProviderKind) {
     cancelConnectionTest();
+    setManualModel(false);
     setForm((current) => ({
       ...current,
       providerKind,
@@ -261,6 +328,19 @@ export function App({
   ) {
     cancelConnectionTest();
     setForm((current) => ({ ...current, ...update }));
+  }
+
+  function toggleManualModel(enabled: boolean) {
+    cancelConnectionTest();
+    setManualModel(enabled);
+    if (!enabled && !catalog.some((model) => model.id === form.model)) {
+      setForm((current) => ({ ...current, model: "" }));
+    }
+  }
+
+  function refreshModels() {
+    if (catalogProvider === null || catalogCredential === null) return;
+    setCatalogRevision((revision) => revision + 1);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -303,6 +383,7 @@ export function App({
       await settingsRepository.save(next);
       setSavedSettings(next);
       setForm(formFromSettings(next));
+      setManualModel(false);
       setStatus("Settings saved on this device.");
     } catch {
       setError("Settings could not be saved. Check the fields and try again.");
@@ -319,6 +400,7 @@ export function App({
       const cleared = await settingsRepository.clearCredentials();
       setSavedSettings(cleared);
       setForm(formFromSettings(cleared));
+      setManualModel(false);
       setStatus("Provider credentials cleared.");
     } catch {
       setError("Provider credentials could not be cleared.");
@@ -335,6 +417,7 @@ export function App({
       const reset = await settingsRepository.reset();
       setSavedSettings(reset);
       setForm(formFromSettings(reset));
+      setManualModel(false);
       setStorageInvalid(false);
       setStatus("Stored settings reset.");
     } catch {
@@ -458,22 +541,92 @@ export function App({
                   </label>
                 ) : null}
 
-                <label className="field">
-                  <span>Model ID</span>
-                  <input
-                    type="text"
-                    aria-label="Model ID"
-                    value={form.model}
-                    onChange={(event) => editProviderField({ model: event.target.value })}
-                  />
-                </label>
+                {form.providerKind === "custom" ? (
+                  <label className="field">
+                    <span>Model name or ID</span>
+                    <input
+                      type="text"
+                      aria-label="Model name or ID"
+                      value={form.model}
+                      onChange={(event) => editProviderField({ model: event.target.value })}
+                    />
+                  </label>
+                ) : (
+                  <div className="model-picker">
+                    {!manualModel ? (
+                      <label className="field">
+                        <span>Model</span>
+                        <select
+                          aria-label="Model"
+                          value={form.model}
+                          disabled={catalogState === "loading" || catalogCredential === null}
+                          onChange={(event) => editProviderField({ model: event.target.value })}
+                        >
+                          <option value="">Choose a model</option>
+                          {form.model && !catalogIncludesModel ? (
+                            <option value={form.model}>Current model (not returned)</option>
+                          ) : null}
+                          {catalog.map((model) => (
+                            <option key={model.id} value={model.id}>{model.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <label className="field">
+                        <span>Custom model ID</span>
+                        <input
+                          type="text"
+                          aria-label="Custom model ID"
+                          value={form.model}
+                          onChange={(event) => editProviderField({ model: event.target.value })}
+                        />
+                      </label>
+                    )}
+
+                    {catalogState === "loading" ? (
+                      <small className="model-status" aria-live="polite">Loading models…</small>
+                    ) : catalogState === "error" ? (
+                      <small className="model-status model-error" role="alert">
+                        Models could not be loaded. Check the API key and try again.
+                      </small>
+                    ) : catalogState === "ready" && catalog.length === 0 ? (
+                      <small className="model-status">No compatible text models were returned.</small>
+                    ) : catalogCredential === null ? (
+                      <small className="model-status">
+                        Enter an API key and accept the disclosure to load models.
+                      </small>
+                    ) : null}
+
+                    <div className="model-actions">
+                      <label className="advanced-model-toggle">
+                        <input
+                          type="checkbox"
+                          checked={manualModel}
+                          onChange={(event) => toggleManualModel(event.target.checked)}
+                        />
+                        <span>Use a model not shown</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="secondary compact"
+                        disabled={catalogState === "loading" || catalogCredential === null}
+                        onClick={refreshModels}
+                      >
+                        Refresh models
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <CredentialControls
                   needsKey={needsKey}
                   hasSavedKey={hasSavedKey}
                   apiKey={form.apiKey}
                   disclosureAccepted={form.disclosureAccepted}
-                  onApiKeyChange={(apiKey) => editCredentialField({ apiKey })}
+                  onApiKeyChange={(apiKey) => editCredentialField({
+                    apiKey,
+                    disclosureAccepted: false
+                  })}
                   onDisclosureChange={(disclosureAccepted) => editCredentialField({
                     disclosureAccepted
                   })}

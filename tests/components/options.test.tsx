@@ -9,6 +9,23 @@ import {
 } from "../../src/domain/settings";
 import type { PermissionsAdapter } from "../../src/platform/permissions";
 import type { SettingsRepository } from "../../src/platform/storage";
+import type {
+  ModelCatalogEntry,
+  ModelCatalogLoader
+} from "../../src/providers/modelCatalog";
+
+vi.mock("../../src/providers/modelCatalog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/providers/modelCatalog")>();
+  return {
+    ...actual,
+    loadModelCatalog: vi.fn(async () => [
+      { id: "test-model", label: "Test Model" },
+      { id: "saved-model", label: "Saved Model" },
+      { id: "changed-model", label: "Changed Model" },
+      { id: "dirty-model", label: "Dirty Model" }
+    ])
+  };
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -68,18 +85,155 @@ function permissions(granted = true): PermissionsAdapter & {
   };
 }
 
+function catalogLoader(
+  result: ModelCatalogEntry[] | Promise<ModelCatalogEntry[]>
+): ReturnType<typeof vi.fn<ModelCatalogLoader>> {
+  return vi.fn<ModelCatalogLoader>(async () => await result);
+}
+
 async function chooseCustomProvider() {
   await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Provider" }), "custom");
 }
 
 async function fillCustomCredential(baseUrl: string) {
   await userEvent.type(screen.getByLabelText("Base URL"), baseUrl);
-  await userEvent.type(screen.getByLabelText("Model ID"), "test-model");
+  await userEvent.type(screen.getByLabelText("Model name or ID"), "test-model");
   await userEvent.type(screen.getByLabelText("API key"), "synthetic-key");
   await userEvent.click(screen.getByLabelText(/This local BYOK extension stores the key/));
 }
 
 describe("options settings", () => {
+  it("loads built-in models with a new key only after BYOK disclosure", async () => {
+    const repository = memoryRepository();
+    const loader = catalogLoader([
+      { id: "provider/alpha", label: "Alpha Reasoner" },
+      { id: "provider/beta", label: "Beta Fast" }
+    ]);
+    render(
+      <App
+        settingsRepository={repository}
+        permissions={permissions()}
+        modelCatalogLoader={loader}
+      />
+    );
+
+    await userEvent.selectOptions(
+      await screen.findByRole("combobox", { name: "Provider" }),
+      "openai"
+    );
+    expect(screen.queryByLabelText("Model ID")).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("");
+    await userEvent.type(screen.getByLabelText("API key"), "new-catalog-synthetic-key");
+    expect(loader).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByLabelText(/This local BYOK extension stores the key/));
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledWith(
+      "openai",
+      "new-catalog-synthetic-key",
+      expect.any(AbortSignal)
+    ));
+    expect(await screen.findByRole("option", { name: "Alpha Reasoner" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Beta Fast" })).toBeTruthy();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Model" }), "provider/beta");
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(repository.saved.at(-1)?.provider).toEqual({
+      kind: "openai",
+      apiKey: "new-catalog-synthetic-key",
+      model: "provider/beta"
+    });
+    expect(document.body.textContent).not.toContain("new-catalog-synthetic-key");
+  });
+
+  it("loads and refreshes a saved provider catalog without rendering its key", async () => {
+    const repository = memoryRepository(parseSettings({
+      provider: {
+        kind: "openrouter",
+        apiKey: "saved-catalog-synthetic-key",
+        model: "vendor/current"
+      }
+    }));
+    const loader = catalogLoader([
+      { id: "vendor/current", label: "Current Model" },
+      { id: "vendor/other", label: "Other Model" }
+    ]);
+    render(
+      <App
+        settingsRepository={repository}
+        permissions={permissions()}
+        modelCatalogLoader={loader}
+      />
+    );
+
+    const chooser = await screen.findByRole("combobox", { name: "Model" }) as HTMLSelectElement;
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledWith(
+      "openrouter",
+      "saved-catalog-synthetic-key",
+      expect.any(AbortSignal)
+    ));
+    await vi.waitFor(() => expect(chooser.value).toBe("vendor/current"));
+    expect(screen.getByRole("option", { name: "Current Model" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("saved-catalog-synthetic-key");
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh models" }));
+    await vi.waitFor(() => expect(loader).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows safe loading, empty, and catalog error states", async () => {
+    let resolveEmpty!: (models: ModelCatalogEntry[]) => void;
+    const pending = new Promise<ModelCatalogEntry[]>((resolve) => { resolveEmpty = resolve; });
+    const emptyLoader = catalogLoader(pending);
+    const first = render(
+      <App
+        settingsRepository={memoryRepository()}
+        permissions={permissions()}
+        modelCatalogLoader={emptyLoader}
+      />
+    );
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Provider" }), "openai");
+    await userEvent.type(screen.getByLabelText("API key"), "empty-synthetic-key");
+    await userEvent.click(screen.getByLabelText(/This local BYOK extension stores the key/));
+    expect(await screen.findByText("Loading models…")).toBeTruthy();
+    resolveEmpty([]);
+    expect(await screen.findByText("No compatible text models were returned.")).toBeTruthy();
+    first.unmount();
+
+    const errorLoader = vi.fn<ModelCatalogLoader>(async () => {
+      throw new Error("RAW catalog-error-synthetic-key");
+    });
+    render(
+      <App
+        settingsRepository={memoryRepository()}
+        permissions={permissions()}
+        modelCatalogLoader={errorLoader}
+      />
+    );
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Provider" }), "openrouter");
+    await userEvent.type(screen.getByLabelText("API key"), "catalog-error-synthetic-key");
+    await userEvent.click(screen.getByLabelText(/This local BYOK extension stores the key/));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Models could not be loaded. Check the API key and try again."
+    );
+    expect(document.body.textContent).not.toContain("catalog-error-synthetic-key");
+    expect(document.body.textContent).not.toContain("RAW");
+  });
+
+  it("offers an explicit manual model fallback for built-in providers", async () => {
+    const loader = catalogLoader([]);
+    render(
+      <App
+        settingsRepository={memoryRepository()}
+        permissions={permissions()}
+        modelCatalogLoader={loader}
+      />
+    );
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Provider" }), "openai");
+
+    expect(screen.queryByLabelText("Custom model ID")).toBeNull();
+    await userEvent.click(screen.getByLabelText("Use a model not shown"));
+    expect(screen.getByLabelText("Custom model ID")).toBeInstanceOf(HTMLInputElement);
+  });
+
   it("confirms Clear summaries through the background without changing settings or credentials", async () => {
     const initial = parseSettings({
       provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "test-model" }
@@ -112,7 +266,7 @@ describe("options settings", () => {
     await chooseCustomProvider();
 
     expect(screen.getByLabelText("Base URL")).toBeInstanceOf(HTMLInputElement);
-    expect(screen.getByLabelText("Model ID")).toBeInstanceOf(HTMLInputElement);
+    expect(screen.getByLabelText("Model name or ID")).toBeInstanceOf(HTMLInputElement);
     const key = screen.getByLabelText("API key") as HTMLInputElement;
     expect(key.type).toBe("password");
     expect(key.value).toBe("");
@@ -238,8 +392,8 @@ describe("options settings", () => {
     expect(await screen.findByText("Connected")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledOnce();
 
-    await userEvent.clear(screen.getByLabelText("Model ID"));
-    await userEvent.type(screen.getByLabelText("Model ID"), "changed-model");
+    await screen.findByRole("option", { name: "Changed Model" });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Model" }), "changed-model");
     expect(screen.queryByText("Connected")).toBeNull();
     expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
   });
@@ -265,8 +419,8 @@ describe("options settings", () => {
 
     const testButton = await screen.findByRole("button", { name: "Test connection" });
     expect((testButton as HTMLButtonElement).disabled).toBe(false);
-    await userEvent.clear(screen.getByLabelText("Model ID"));
-    await userEvent.type(screen.getByLabelText("Model ID"), "dirty-model");
+    await screen.findByRole("option", { name: "Dirty Model" });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Model" }), "dirty-model");
 
     expect((testButton as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
