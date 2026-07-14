@@ -126,11 +126,12 @@ Create package.json:
   "packageManager": "pnpm@11.13.0",
   "engines": { "node": ">=22.0.0" },
   "scripts": {
+    "postinstall": "wxt prepare",
     "dev": "wxt",
     "build": "wxt build",
     "build:test": "WXT_TEST_MODE=1 wxt build",
     "zip": "wxt zip",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "wxt prepare && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:extension": "playwright test",
@@ -146,6 +147,7 @@ Create package.json:
     "@playwright/test": "1.61.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
+    "@types/node": "22.20.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "jsdom": "29.1.1",
@@ -375,6 +377,7 @@ describe("YouTube video identity", () => {
       canonicalUrl: "https://www.youtube.com/watch?v=abcdefghijk"
     });
     expect(parseWatchUrl("https://www.youtube.com/shorts/abcdefghijk")).toBeNull();
+    expect(parseWatchUrl("not a url")).toBeNull();
   });
 });
 
@@ -422,11 +425,15 @@ export type VideoContext = {
 };
 
 export function parseWatchUrl(value: string): Pick<VideoContext, "videoId" | "canonicalUrl"> | null {
-  const url = new URL(value);
-  if (url.origin !== "https://www.youtube.com" || url.pathname !== "/watch") return null;
-  const videoId = url.searchParams.get("v");
-  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
-  return { videoId, canonicalUrl: "https://www.youtube.com/watch?v=" + videoId };
+  try {
+    const url = new URL(value);
+    if (url.origin !== "https://www.youtube.com" || url.pathname !== "/watch") return null;
+    const videoId = url.searchParams.get("v");
+    if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+    return { videoId, canonicalUrl: "https://www.youtube.com/watch?v=" + videoId };
+  } catch {
+    return null;
+  }
 }
 ~~~
 
@@ -649,6 +656,8 @@ Expected: PASS.
 
 Move both setAccessLevel calls outside onInstalled so updated or restarted workers also enforce trusted access. Keep sidePanel.setPanelBehavior in onInstalled and call it once at startup as an idempotent fallback.
 
+Chrome documents AccessLevel, storage.session, and setAccessLevel for Chrome 102+, so these unconditional calls remain compatible with the Chrome 114 minimum. Preserve the Chrome 114 manual smoke test as the runtime gate.
+
 Run: **pnpm test && pnpm build**
 
 Expected: PASS and the built manifest contains storage plus optional_host_permissions.
@@ -695,7 +704,7 @@ Expected: commit contains no real API key and no .env file.
 import { expect, it } from "vitest";
 import { videoSummarySchema } from "../../src/domain/summary";
 
-it("accepts a complete timestamp-aware summary and rejects HTML-shaped data", () => {
+it("accepts escaped HTML-shaped text and rejects control characters", () => {
   const value = {
     schemaVersion: 1,
     overview: ["A grounded overview."],
@@ -705,7 +714,14 @@ it("accepts a complete timestamp-aware summary and rejects HTML-shaped data", ()
     generatedAt: "2026-07-13T12:00:00.000Z"
   };
   expect(videoSummarySchema.parse(value)).toEqual(value);
-  expect(() => videoSummarySchema.parse({ ...value, overview: "<img onerror=alert(1)>" })).toThrow();
+  expect(videoSummarySchema.parse({
+    ...value,
+    overview: ["<img onerror=alert(1)>"]
+  }).overview[0]).toBe("<img onerror=alert(1)>");
+  expect(() => videoSummarySchema.parse({
+    ...value,
+    overview: ["invalid\u0000text"]
+  })).toThrow();
 });
 ~~~
 
@@ -1099,7 +1115,22 @@ Derive the extension ID from the service worker URL. Close the context and serve
 
 - [ ] **Step 2: Add test-only local page matching**
 
-When WXT_TEST_MODE is 1, youtube.content.ts also matches http://127.0.0.1/* and the player bridge accepts that origin only in the test build. The fixture page implements #movie_player.getPlayerResponse(), a video element, title/channel metadata, and a caption base URL served by the mock server. Production builds contain neither the localhost match nor test bridge allowance.
+youtube.content.ts defines build-time matches exactly as follows:
+
+~~~ts
+const contentMatches = import.meta.env.WXT_TEST_MODE === "1"
+  ? ["https://www.youtube.com/*", "http://127.0.0.1/*"]
+  : ["https://www.youtube.com/*"];
+
+export default defineContentScript({
+  matches: contentMatches,
+  main(ctx) {
+    registerYouTubeMessageHandlers(ctx);
+  }
+});
+~~~
+
+WXT imports entrypoints at build time to generate content-script manifest entries and exposes WXT_-prefixed environment variables through import.meta.env. The fixture page implements #movie_player.getPlayerResponse(), a video element, title/channel metadata, and a caption base URL served by the mock server. Production builds contain neither the localhost match nor test bridge allowance.
 
 Add a manifest test that runs both builds and asserts localhost appears only in the test manifest.
 
