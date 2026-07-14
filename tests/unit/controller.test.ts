@@ -14,6 +14,7 @@ import {
   ActiveJobStore,
   type StorageAreaAdapter
 } from "../../src/platform/storage";
+import type { CachedSummary } from "../../src/platform/cache";
 
 const contextA: VideoContext = {
     videoId: "aaaaaaaaaaa",
@@ -370,6 +371,30 @@ describe("SummaryController", () => {
     expect(fixture.dependencies.summaryCache?.get).toHaveBeenCalledWith(
       expect.stringMatching(/^[a-f0-9]{64}$/)
     );
+  });
+
+  it("treats an invalid cached summary as a miss and regenerates it", async () => {
+    const fixture = setup({
+      summaryCache: {
+        get: vi.fn(async () => ({
+          result: { schemaVersion: 1, overview: "not-an-array" },
+          createdAt: "2026-07-14T01:00:00.000Z"
+        }) as unknown as CachedSummary),
+        set: vi.fn(async () => true),
+        writeToken: vi.fn(() => 0),
+        clear: vi.fn(async () => undefined)
+      }
+    });
+
+    await expect(fixture.controller.start({
+      requestId: "invalid-cache-hit",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    })).resolves.toMatchObject({ state: "complete", result: { summary, cache: null } });
+    expect(fixture.dependencies.createProvider).toHaveBeenCalledOnce();
+    expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce();
+    expect(fixture.dependencies.summaryCache.set).toHaveBeenCalledOnce();
   });
 
   it("force bypasses cache reads but writes a current validated success", async () => {

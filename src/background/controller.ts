@@ -340,7 +340,7 @@ export class SummaryController {
           const cached = await this.dependencies.summaryCache.get(cacheKey).catch(() => null);
           if (job.signal.aborted || !this.#registry.isCurrent(job)) return this.status(request.tabId);
           if (cached !== null) {
-            const cachedResult = completedSummaryPayloadSchema.parse({
+            const cachedResult = completedSummaryPayloadSchema.safeParse({
               video: {
                 videoId: context.videoId,
                 title: context.title,
@@ -354,18 +354,20 @@ export class SummaryController {
               summary: cached.result,
               cache: { key: cacheKey, createdAt: cached.createdAt }
             });
-            if (!this.#registry.complete(job, cachedResult)) return this.status(request.tabId);
-            await this.#registry.settled();
-            if (!this.#ownsCompleted(job)) return this.status(request.tabId);
-            const snapshot = this.#registry.status(request.tabId);
-            if (snapshot?.state !== "complete" || snapshot.requestId !== job.requestId) return snapshot;
-            this.dependencies.emit({
-              type: "job/complete",
-              requestId: job.requestId,
-              tabId: job.tabId,
-              result: snapshot.result
-            });
-            return snapshot;
+            if (cachedResult.success) {
+              if (!this.#registry.complete(job, cachedResult.data)) return this.status(request.tabId);
+              await this.#registry.settled();
+              if (!this.#ownsCompleted(job)) return this.status(request.tabId);
+              const snapshot = this.#registry.status(request.tabId);
+              if (snapshot?.state !== "complete" || snapshot.requestId !== job.requestId) return snapshot;
+              this.dependencies.emit({
+                type: "job/complete",
+                requestId: job.requestId,
+                tabId: job.tabId,
+                result: snapshot.result
+              });
+              return snapshot;
+            }
           }
         }
       }
