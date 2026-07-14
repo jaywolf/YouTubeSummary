@@ -20,7 +20,12 @@ export const appMessageSchema = z.discriminatedUnion("type", [
     preference: transcriptPreferenceSchema
   }),
   z.object({ type: z.literal("youtube/cancel-extract"), ...base }),
-  z.object({ type: z.literal("youtube/seek"), ...base, seconds: z.number().nonnegative() }),
+  z.object({
+    type: z.literal("youtube/seek"),
+    ...base,
+    videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+    seconds: z.number().nonnegative()
+  }),
   z.object({ type: z.literal("youtube/navigated"), ...base, videoId: z.string().nullable() })
 ]);
 

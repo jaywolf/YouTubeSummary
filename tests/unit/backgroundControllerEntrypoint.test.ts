@@ -73,6 +73,38 @@ describe("background controller entrypoint", () => {
     expect(controller.navigated).not.toHaveBeenCalled();
   });
 
+  it("trusts authoritative sender.tab.url instead of the non-authoritative sender URL", async () => {
+    const module = await importBackground();
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn(async () => undefined)
+    };
+    const listener = module.createBackgroundMessageListener(controller as never);
+    const message = {
+      type: "youtube/navigated",
+      requestId: "navigation",
+      tabId: 0,
+      videoId: "bbbbbbbbbbb"
+    };
+
+    expect(listener(message, {
+      id: "extension-id",
+      url: "https://www.youtube.com/watch?v=bbbbbbbbbbb",
+      tab: { id: 91, url: "https://evil.example/watch?v=bbbbbbbbbbb" }
+    }, vi.fn())).toBeUndefined();
+    expect(controller.navigated).not.toHaveBeenCalled();
+
+    const sendResponse = vi.fn();
+    expect(listener(message, {
+      id: "extension-id",
+      url: "https://evil.example/isolated-world.js",
+      tab: { id: 91, url: "https://www.youtube.com/watch?v=bbbbbbbbbbb" }
+    }, sendResponse)).toBe(true);
+    await vi.waitFor(() => expect(controller.navigated).toHaveBeenCalledWith(91, "bbbbbbbbbbb"));
+  });
+
   it("adapts panel promises with sendResponse and literal true for Chrome 114", async () => {
     const module = await importBackground();
     const snapshot = { requestId: "start", tabId: 4, videoId: "aaaaaaaaaaa", state: "loading_video" };

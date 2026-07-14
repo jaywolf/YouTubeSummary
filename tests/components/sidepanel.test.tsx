@@ -76,10 +76,12 @@ function setup(status: JobSnapshot | null = null) {
   const client: PanelClient = {
     queryActiveTab: vi.fn(async () => ({
       id: 4,
+      active: true,
       url: "https://www.youtube.com/watch?v=aaaaaaaaaaa"
     })),
     getTab: vi.fn(async () => ({
       id: 4,
+      active: true,
       url: "https://www.youtube.com/watch?v=aaaaaaaaaaa"
     })),
     sendRuntimeMessage,
@@ -198,6 +200,55 @@ describe("side panel", () => {
     });
     await Promise.resolve();
     expect(screen.getByText("Hostile video")).toBeTruthy();
+  });
+
+  it("reconciles a terminal port event that arrives after stale status is captured", async () => {
+    let resolveStatus!: (snapshot: JobSnapshot | null) => void;
+    const fixture = setup(null);
+    fixture.client.sendRuntimeMessage = vi.fn(async (message) => {
+      if (message.type === "panel/status") {
+        return new Promise((resolve) => { resolveStatus = resolve; });
+      }
+      return null;
+    });
+    render(<App client={fixture.client} />);
+    await vi.waitFor(() => expect(resolveStatus).toBeTypeOf("function"));
+
+    fixture.port.emit({
+      type: "job/complete",
+      requestId: "other-job",
+      tabId: 4,
+      result
+    });
+    fixture.port.emit({
+      type: "job/complete",
+      requestId: "current-job",
+      tabId: 4,
+      result: {
+        ...result,
+        video: { ...result.video, videoId: "bbbbbbbbbbb", title: "Wrong buffered video" }
+      }
+    });
+    fixture.port.emit({
+      type: "job/complete",
+      requestId: "current-job",
+      tabId: 4,
+      result
+    });
+    resolveStatus({
+      requestId: "current-job",
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "summarizing",
+      progress: { completed: 0, total: 1 },
+      startedAt: 1
+    });
+
+    expect(await screen.findByText("Hostile video")).toBeTruthy();
+    expect(screen.queryByText("Wrong buffered video")).toBeNull();
+    expect((fixture.client.sendRuntimeMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([message]) => message.type === "panel/start"
+    )).toHaveLength(0);
   });
 
   it("cancels an active job and regenerates a completed one with force", async () => {
@@ -325,6 +376,19 @@ describe("side panel", () => {
     expect(copied).not.toContain("<section");
   });
 
+  it("keeps Copy available and handles clipboard rejection", async () => {
+    const fixture = setup(complete);
+    fixture.client.writeClipboard = vi.fn(async () => {
+      throw new Error("Clipboard permission denied");
+    });
+    render(<App client={fixture.client} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(fixture.client.writeClipboard).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+  });
+
   it("seeks only the tab that still displays the result video", async () => {
     const fixture = setup(complete);
     render(<App client={fixture.client} />);
@@ -334,12 +398,22 @@ describe("side panel", () => {
       type: "youtube/seek",
       requestId: "job-complete",
       tabId: 4,
+      videoId: "aaaaaaaaaaa",
       seconds: 754
     });
 
     (fixture.client.getTab as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       id: 4,
+      active: true,
       url: "https://www.youtube.com/watch?v=bbbbbbbbbbb"
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Jump to 12:34" }));
+    expect(fixture.client.sendTabMessage).toHaveBeenCalledTimes(1);
+
+    (fixture.client.getTab as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 4,
+      active: false,
+      url: "https://www.youtube.com/watch?v=aaaaaaaaaaa"
     });
     await userEvent.click(screen.getByRole("button", { name: "Jump to 12:34" }));
     expect(fixture.client.sendTabMessage).toHaveBeenCalledTimes(1);

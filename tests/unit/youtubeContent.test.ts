@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppMessage } from "../../src/domain/messages";
 import type { Transcript, VideoContext } from "../../src/domain/video";
 import {
@@ -34,6 +34,8 @@ const transcript: Transcript = {
   },
   segments: [{ startSeconds: 0, durationSeconds: 1, text: "Hello" }]
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("YouTube content runtime messages", () => {
   it("validates extraction input and returns a validated plain transcript", async () => {
@@ -129,6 +131,7 @@ describe("YouTube content runtime messages", () => {
   });
 
   it("seeks without forcing a paused video to play", async () => {
+    vi.stubGlobal("location", { href: context.canonicalUrl });
     const video = document.createElement("video");
     const play = vi.spyOn(video, "play");
     const handler = createYouTubeMessageHandler({
@@ -142,11 +145,34 @@ describe("YouTube content runtime messages", () => {
       type: "youtube/seek",
       requestId: "seek-1",
       tabId: 7,
+      videoId: "abcdefghijk",
       seconds: 42
     });
 
     expect(video.currentTime).toBe(42);
     expect(play).not.toHaveBeenCalled();
+  });
+
+  it("refuses a seek when navigation changed the content-script video", async () => {
+    vi.stubGlobal("location", { href: "https://www.youtube.com/watch?v=bbbbbbbbbbb" });
+    const video = document.createElement("video");
+    const findVideo = vi.fn(() => video);
+    const handler = createYouTubeMessageHandler({
+      extract: vi.fn(),
+      fetchText: vi.fn(),
+      readVisibleSegments: vi.fn(),
+      findVideo
+    });
+
+    await handler({
+      type: "youtube/seek",
+      requestId: "seek-1",
+      tabId: 7,
+      videoId: "abcdefghijk",
+      seconds: 42
+    });
+    expect(video.currentTime).toBe(0);
+    expect(findVideo).not.toHaveBeenCalled();
   });
 
   it("returns a safe extraction error and omits its cause", async () => {
@@ -204,7 +230,13 @@ describe("Chrome 114 runtime listener adapter", () => {
 
   it.each([
     { type: "youtube/cancel-extract", requestId: "extract-1", tabId: 7 },
-    { type: "youtube/seek", requestId: "seek-1", tabId: 7, seconds: 4 }
+    {
+      type: "youtube/seek",
+      requestId: "seek-1",
+      tabId: 7,
+      videoId: "abcdefghijk",
+      seconds: 4
+    }
   ])("keeps the channel open for recognized $type work", async (message) => {
     const handler = vi.fn(async () => undefined);
     const sendResponse = vi.fn();

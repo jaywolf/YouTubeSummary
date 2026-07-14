@@ -78,6 +78,7 @@ export function createYouTubeMessageHandler(
     }
 
     if (message.type === "youtube/seek") {
+      if (parseWatchUrl(location.href)?.videoId !== message.videoId) return undefined;
       const video = dependencies.findVideo();
       if (video !== null) video.currentTime = message.seconds;
       return undefined;

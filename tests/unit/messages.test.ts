@@ -46,6 +46,22 @@ describe("parseAppMessage", () => {
     }).type).toBe("youtube/cancel-extract");
   });
 
+  it("requires the expected video identity on seek messages", () => {
+    expect(parseAppMessage({
+      type: "youtube/seek",
+      requestId: "seek-1",
+      tabId: 7,
+      videoId: "abcdefghijk",
+      seconds: 12
+    })).toMatchObject({ type: "youtube/seek", videoId: "abcdefghijk" });
+    expect(() => parseAppMessage({
+      type: "youtube/seek",
+      requestId: "seek-1",
+      tabId: 7,
+      seconds: 12
+    })).toThrow();
+  });
+
   it("rejects invalid nested extraction context", () => {
     expect(() => parseAppMessage({
       type: "youtube/extract",

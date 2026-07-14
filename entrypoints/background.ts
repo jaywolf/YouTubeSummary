@@ -124,7 +124,7 @@ function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender 
 } {
   if (sender.id !== browser.runtime.id || !Number.isInteger(sender.tab?.id)) return false;
   try {
-    return new URL(sender.url ?? sender.tab?.url ?? "").origin === "https://www.youtube.com";
+    return new URL(sender.tab?.url ?? "").origin === "https://www.youtube.com";
   } catch {
     return false;
   }

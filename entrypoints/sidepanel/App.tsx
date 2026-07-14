@@ -8,7 +8,11 @@ import {
 } from "../../src/domain/summary";
 import { parseWatchUrl } from "../../src/domain/video";
 
-type PanelTab = { id?: number | undefined; url?: string | undefined };
+type PanelTab = {
+  id?: number | undefined;
+  active?: boolean | undefined;
+  url?: string | undefined;
+};
 
 export type PanelPort = {
   name: string;
@@ -48,6 +52,12 @@ const ACTIVE_STATES = new Set<JobState>([
   "extracting_transcript",
   "summarizing"
 ]);
+
+function isTerminalEvent(event: BackgroundEvent): boolean {
+  return event.type === "job/complete"
+    || event.type === "job/error"
+    || event.type === "job/state" && ["canceled", "interrupted"].includes(event.state);
+}
 
 function isSafeError(value: unknown): value is SafeAppError {
   if (!value || typeof value !== "object") return false;
@@ -152,6 +162,8 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   const videoIdRef = useRef<string | null>(null);
   const requestIdRef = useRef<string | null>(null);
   const stateVersionRef = useRef(0);
+  const statusPendingRef = useRef(false);
+  const pendingTerminalEventsRef = useRef<BackgroundEvent[]>([]);
 
   function acceptSnapshot(candidate: JobSnapshot, expectedVersion?: number): boolean {
     if (!mountedRef.current) return false;
@@ -193,6 +205,54 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
     if (response !== null) acceptSnapshot(response, requestVersion);
   }
 
+  function applyEvent(event: BackgroundEvent): boolean {
+    if (event.tabId !== tabIdRef.current || event.requestId !== requestIdRef.current) return false;
+    if (event.type === "job/complete") {
+      const result = completedSummaryPayloadSchema.safeParse(event.result);
+      if (!result.success || result.data.video.videoId !== videoIdRef.current) return false;
+      stateVersionRef.current++;
+      setSnapshot((current) => current === null ? current : {
+        ...current,
+        state: "complete",
+        progress: { completed: 1, total: 1 },
+        result: result.data
+      });
+    } else if (event.type === "job/error") {
+      if (!isSafeError(event.error)) return false;
+      stateVersionRef.current++;
+      setSnapshot((current) => current === null ? current : {
+        requestId: current.requestId,
+        tabId: current.tabId,
+        videoId: current.videoId,
+        state: "error",
+        progress: current.progress,
+        startedAt: current.startedAt,
+        error: event.error
+      });
+    } else if (event.type === "job/progress") {
+      if (!Number.isInteger(event.completed) || !Number.isInteger(event.total)
+          || event.completed < 0 || event.total < 1 || event.completed > event.total) return false;
+      stateVersionRef.current++;
+      setSnapshot((current) => current === null ? current : {
+        ...current,
+        progress: { completed: event.completed, total: event.total }
+      });
+    } else {
+      if (!["loading_video", "extracting_transcript", "summarizing", "canceled", "interrupted"]
+        .includes(event.state)) return false;
+      stateVersionRef.current++;
+      setSnapshot((current) => current === null ? current : {
+        requestId: current.requestId,
+        tabId: current.tabId,
+        videoId: current.videoId,
+        state: event.state as Exclude<JobState, "complete" | "error">,
+        progress: current.progress,
+        startedAt: current.startedAt
+      });
+    }
+    return true;
+  }
+
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -201,50 +261,18 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   useEffect(() => {
     const port = client.connect();
     const listener = (event: BackgroundEvent) => {
-      if (event.tabId !== tabIdRef.current || event.requestId !== requestIdRef.current) return;
-      if (event.type === "job/complete") {
-        const result = completedSummaryPayloadSchema.safeParse(event.result);
-        if (!result.success || result.data.video.videoId !== videoIdRef.current) return;
-        stateVersionRef.current++;
-        setSnapshot((current) => current === null ? current : {
-          ...current,
-          state: "complete",
-          progress: { completed: 1, total: 1 },
-          result: result.data
-        });
-      } else if (event.type === "job/error") {
-        if (!isSafeError(event.error)) return;
-        stateVersionRef.current++;
-        setSnapshot((current) => current === null ? current : {
-          requestId: current.requestId,
-          tabId: current.tabId,
-          videoId: current.videoId,
-          state: "error",
-          progress: current.progress,
-          startedAt: current.startedAt,
-          error: event.error
-        });
-      } else if (event.type === "job/progress") {
-        if (!Number.isInteger(event.completed) || !Number.isInteger(event.total)
-            || event.completed < 0 || event.total < 1 || event.completed > event.total) return;
-        stateVersionRef.current++;
-        setSnapshot((current) => current === null ? current : {
-          ...current,
-          progress: { completed: event.completed, total: event.total }
-        });
-      } else {
-        if (!["loading_video", "extracting_transcript", "summarizing", "canceled", "interrupted"]
-          .includes(event.state)) return;
-        stateVersionRef.current++;
-        setSnapshot((current) => current === null ? current : {
-          requestId: current.requestId,
-          tabId: current.tabId,
-          videoId: current.videoId,
-          state: event.state as Exclude<JobState, "complete" | "error">,
-          progress: current.progress,
-          startedAt: current.startedAt
-        });
+      if (event.tabId !== tabIdRef.current) return;
+      if (requestIdRef.current === null && statusPendingRef.current && isTerminalEvent(event)) {
+        if (event.type === "job/complete") {
+          const parsed = completedSummaryPayloadSchema.safeParse(event.result);
+          if (!parsed.success || parsed.data.video.videoId !== videoIdRef.current) return;
+        }
+        const pending = pendingTerminalEventsRef.current;
+        pending.push(event);
+        if (pending.length > 16) pending.shift();
+        return;
       }
+      applyEvent(event);
     };
     port.onMessage.addListener(listener);
     return () => {
@@ -271,14 +299,22 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       videoIdRef.current = identity.videoId;
       const statusRequestId = client.createRequestId();
       const version = stateVersionRef.current;
+      statusPendingRef.current = true;
       const current = parseSnapshot(await client.sendRuntimeMessage({
         type: "panel/status",
         requestId: statusRequestId,
         tabId: tabId!
       }).catch(() => null));
+      statusPendingRef.current = false;
       if (!mountedRef.current) return;
       if (stateVersionRef.current !== version) return;
-      if (current !== null && acceptSnapshot(current, version)) return;
+      if (current !== null && acceptSnapshot(current, version)) {
+        const pending = pendingTerminalEventsRef.current;
+        pendingTerminalEventsRef.current = [];
+        for (const event of pending) applyEvent(event);
+        return;
+      }
+      pendingTerminalEventsRef.current = [];
       await start(false);
     })();
   }, [client]);
@@ -299,13 +335,25 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
     if (snapshot?.state !== "complete" || result.video.videoId !== snapshot.videoId) return;
     const tab: PanelTab = await client.getTab(snapshot.tabId).catch(() => ({}));
     const identity = typeof tab.url === "string" ? parseWatchUrl(tab.url) : null;
-    if (tab.id !== snapshot.tabId || identity?.videoId !== result.video.videoId) return;
+    if (tab.id !== snapshot.tabId || tab.active !== true
+        || identity?.videoId !== result.video.videoId) return;
     await client.sendTabMessage(snapshot.tabId, {
       type: "youtube/seek",
       requestId: snapshot.requestId,
       tabId: snapshot.tabId,
+      videoId: result.video.videoId,
       seconds
     }).catch(() => undefined);
+  }
+
+  async function copyResult(result: CompletedSummaryPayload, requestId: string) {
+    setCopied(false);
+    try {
+      await client.writeClipboard(copyText(result));
+      if (mountedRef.current && requestIdRef.current === requestId) setCopied(true);
+    } catch {
+      if (mountedRef.current) setCopied(false);
+    }
   }
 
   if (booting || snapshot === null) {
@@ -380,7 +428,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
       </header>
 
       <div className="summary-actions">
-        <button onClick={() => void client.writeClipboard(copyText(result)).then(() => setCopied(true))}>
+        <button onClick={() => void copyResult(result, snapshot.requestId)}>
           {copied ? "Copied" : "Copy"}
         </button>
         <button onClick={() => void start(true)}>Regenerate</button>
