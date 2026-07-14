@@ -12,7 +12,10 @@ import {
 } from "../../src/summarization/chunking";
 import { runSummaryPipeline, type PipelineProgress } from "../../src/summarization/pipeline";
 import {
+  buildChunkPrompt,
   buildSummaryPrompt,
+  buildSynthesisPrompt,
+  PROMPT_VERSION,
   serializePrompt,
   serializeTranscriptSegments
 } from "../../src/summarization/prompts";
@@ -93,6 +96,36 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+describe("summary prompts", () => {
+  const singleLineInstruction =
+    "Every string in the structured summary must be single-line and contain no carriage returns, line feeds, or tab characters.";
+
+  it.each([
+    ["final summary", () => buildSummaryPrompt({
+      video,
+      transcript: [segment(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage
+    })],
+    ["chunk summary", () => buildChunkPrompt({
+      video,
+      transcript: [segment(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage
+    })],
+    ["synthesis summary", () => buildSynthesisPrompt({
+      video,
+      summaries: [intermediate(0)],
+      outputLanguage: DEFAULT_SETTINGS.outputLanguage,
+      final: true
+    })]
+  ])("explicitly requires single-line strings in the %s prompt", (_name, buildPrompt) => {
+    expect(buildPrompt().system).toContain(singleLineInstruction);
+  });
+
+  it("increments the prompt version when output constraints change", () => {
+    expect(PROMPT_VERSION).toBe("v2");
+  });
+});
 
 describe("runSummaryPipeline", () => {
   it("preserves the exact one-call path and phase-bearing progress", async () => {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SafeAppError } from "./errors";
+import { APP_ERROR_CODES, type SafeAppError } from "./errors";
 import type { CompletedSummaryPayload } from "./summary";
 import {
   transcriptPreferenceSchema,
@@ -73,28 +73,7 @@ export function parseAppMessage(value: unknown): AppMessage {
 }
 
 const safeAppErrorSchema = z.object({
-  code: z.enum([
-    "unsupported_page",
-    "video_context_unavailable",
-    "captions_unavailable",
-    "transcript_extraction_failed",
-    "configuration_missing",
-    "configuration_invalid",
-    "custom_permission_denied",
-    "credentials_rejected",
-    "insufficient_credits",
-    "provider_forbidden",
-    "rate_limited",
-    "provider_unavailable",
-    "network_unavailable",
-    "network_timeout",
-    "context_limit_exceeded",
-    "provider_output_invalid",
-    "content_filtered",
-    "request_canceled",
-    "request_interrupted",
-    "internal_error"
-  ]),
+  code: z.enum(APP_ERROR_CODES),
   retryable: z.boolean(),
   safeMessage: z.string(),
   recoveryAction: z.enum(["retry", "settings", "change_model", "none"]),

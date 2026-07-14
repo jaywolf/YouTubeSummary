@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  APP_ERROR_CODES,
+  ERROR_PRESENTATIONS,
+  type AppErrorCode
+} from "../../src/domain/errors";
+import {
   parseAppMessage,
   parseTranscriptResponse,
   type BackgroundEvent
@@ -125,6 +130,33 @@ describe("parseTranscriptResponse", () => {
       safeMessage: "No captions are available for this video.",
       recoveryAction: "none"
     })).toHaveProperty("code", "captions_unavailable");
+  });
+
+  it("accepts every shared application error code at runtime", () => {
+    const typedCodes: readonly AppErrorCode[] = APP_ERROR_CODES;
+
+    expect(typedCodes).toHaveLength(new Set(typedCodes).size);
+    for (const code of typedCodes) {
+      expect(parseTranscriptResponse({
+        code,
+        retryable: false,
+        safeMessage: "Safe message",
+        recoveryAction: "none"
+      })).toHaveProperty("code", code);
+    }
+  });
+
+  it("keeps error presentations synchronized with the shared codes", () => {
+    expect(Object.keys(ERROR_PRESENTATIONS).sort()).toEqual([...APP_ERROR_CODES].sort());
+  });
+
+  it("rejects an error code outside the shared tuple", () => {
+    expect(() => parseTranscriptResponse({
+      code: "not_an_application_error",
+      retryable: false,
+      safeMessage: "Safe message",
+      recoveryAction: "none"
+    })).toThrow();
   });
 
   it("rejects invalid transcript timing", () => {
