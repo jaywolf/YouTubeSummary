@@ -80,6 +80,32 @@ async function fillCustomCredential(baseUrl: string) {
 }
 
 describe("options settings", () => {
+  it("confirms Clear summaries through the background without changing settings or credentials", async () => {
+    const initial = parseSettings({
+      provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "test-model" }
+    });
+    const repository = memoryRepository(initial);
+    const clearSummaries = vi.fn(async () => undefined);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <App
+        settingsRepository={repository}
+        permissions={permissions()}
+        clearSummaries={clearSummaries}
+      />
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Clear summaries" }));
+
+    expect(confirm).toHaveBeenCalledWith("Clear all cached summaries from this device?");
+    expect(clearSummaries).toHaveBeenCalledOnce();
+    expect(repository.saved).toHaveLength(0);
+    expect(repository.clear).not.toHaveBeenCalled();
+    expect(repository.reset).not.toHaveBeenCalled();
+    expect(await screen.findByText("Cached summaries cleared.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("stored-synthetic-key");
+  });
+
   it("reveals custom provider fields without pre-filling a key", async () => {
     render(<App settingsRepository={memoryRepository()} permissions={permissions()} />);
 

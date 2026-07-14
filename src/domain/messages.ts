@@ -14,6 +14,10 @@ export const appMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("panel/cancel"), ...base }),
   z.object({ type: z.literal("panel/status"), ...base }),
   z.object({
+    type: z.literal("options/clear-summaries"),
+    requestId: z.string().min(1)
+  }),
+  z.object({
     type: z.literal("youtube/extract"),
     ...base,
     context: videoContextSchema,

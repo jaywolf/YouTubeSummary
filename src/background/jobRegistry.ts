@@ -4,6 +4,7 @@ import {
   completedSummaryPayloadSchema,
   type CompletedSummaryPayload
 } from "../domain/summary";
+import type { ActiveJobStore, PersistedJobSnapshot } from "../platform/storage";
 
 export type JobIdentity = {
   requestId: string;
@@ -89,8 +90,42 @@ export class JobRegistry {
 
   constructor(
     private readonly createRequestId: () => string = () => crypto.randomUUID(),
-    private readonly now: () => number = () => Date.now()
+    private readonly now: () => number = () => Date.now(),
+    private readonly activeJobs?: ActiveJobStore
   ) {}
+
+  #persist(job: MutableJob): void {
+    if (this.activeJobs === undefined) return;
+    const value: PersistedJobSnapshot = {
+      requestId: job.requestId,
+      tabId: job.tabId,
+      videoId: job.videoId,
+      state: job.state,
+      progress: job.progress === null ? null : { ...job.progress },
+      startedAt: job.startedAt
+    };
+    const operation = isTerminalState(job.state)
+      ? this.activeJobs.remove(job)
+      : this.activeJobs.save(value);
+    void operation.catch(() => undefined);
+  }
+
+  async restoreInterruptedJobs(): Promise<void> {
+    if (this.activeJobs === undefined) return;
+    const restored = await this.activeJobs.restoreInterruptedJobs();
+    for (const value of restored) {
+      const controller = new AbortController();
+      this.#jobs.set(value.tabId, {
+        ...value,
+        controller,
+        progress: value.progress === null ? null : { ...value.progress }
+      });
+    }
+  }
+
+  async settled(): Promise<void> {
+    await this.activeJobs?.settled();
+  }
 
   begin(tabId: number, videoId: string, requestId = this.createRequestId()): JobRecord {
     const previous = this.#jobs.get(tabId);
@@ -107,6 +142,7 @@ export class JobRegistry {
       startedAt: this.now()
     };
     this.#jobs.set(tabId, job);
+    this.#persist(job);
     return publicRecord(job);
   }
 
@@ -124,6 +160,7 @@ export class JobRegistry {
     current.state = state;
     delete current.error;
     delete current.result;
+    this.#persist(current);
     return true;
   }
 
@@ -144,6 +181,7 @@ export class JobRegistry {
       throw new Error("Invalid job progress");
     }
     current.progress = { ...progress };
+    this.#persist(current);
     return true;
   }
 
@@ -160,6 +198,7 @@ export class JobRegistry {
     current.result = result;
     current.state = "complete";
     delete current.error;
+    this.#persist(current);
     return true;
   }
 
@@ -172,6 +211,7 @@ export class JobRegistry {
     current.error = { ...error };
     current.state = "error";
     delete current.result;
+    this.#persist(current);
     return true;
   }
 
@@ -185,6 +225,22 @@ export class JobRegistry {
     current.state = "canceled";
     delete current.error;
     delete current.result;
+    this.#persist(current);
+    return true;
+  }
+
+  invalidate(tabId: number, requestId?: string): boolean {
+    const current = this.#jobs.get(tabId);
+    if (current === undefined || requestId !== undefined && current.requestId !== requestId) {
+      return false;
+    }
+    if (!current.controller.signal.aborted && !isTerminalState(current.state)) {
+      current.controller.abort();
+    }
+    this.#jobs.delete(tabId);
+    if (this.activeJobs !== undefined) {
+      void this.activeJobs.remove(current).catch(() => undefined);
+    }
     return true;
   }
 

@@ -1,13 +1,20 @@
 import { SummaryController } from "../src/background/controller";
+import { JobRegistry } from "../src/background/jobRegistry";
 import { AppError } from "../src/domain/errors";
 import {
   parseAppMessage,
   parseTranscriptResponse,
   type BackgroundEvent
 } from "../src/domain/messages";
-import type { Transcript, TranscriptPreference, VideoContext } from "../src/domain/video";
+import {
+  parseWatchUrl,
+  type Transcript,
+  type TranscriptPreference,
+  type VideoContext
+} from "../src/domain/video";
 import { createProvider } from "../src/providers/factory";
-import { browserSettingsRepository } from "../src/platform/storage";
+import { browserActiveJobStore, browserSettingsRepository } from "../src/platform/storage";
+import { browserSummaryCache } from "../src/platform/cache";
 import { runSummaryPipeline } from "../src/summarization/pipeline";
 import { readVideoContextFromTab } from "../src/youtube/playerSnapshot";
 
@@ -117,7 +124,10 @@ type MessageSender = {
   tab?: { id?: number | undefined; url?: string | undefined } | undefined;
 };
 
-type MessageController = Pick<SummaryController, "start" | "cancel" | "status" | "navigated">;
+type MessageController = Pick<
+  SummaryController,
+  "start" | "cancel" | "status" | "navigated" | "clearSummaryCache"
+>;
 
 function isTrustedYouTubeSender(sender: MessageSender): sender is MessageSender & {
   tab: { id: number; url?: string };
@@ -150,17 +160,23 @@ export function createBackgroundMessageListener(
       if (!isTrustedYouTubeSender(sender)) return undefined;
     } else if (message.type !== "panel/start"
         && message.type !== "panel/cancel"
-        && message.type !== "panel/status") {
+        && message.type !== "panel/status"
+        && message.type !== "options/clear-summaries") {
       return undefined;
     }
 
     const response: Promise<unknown> = ready.then(async (): Promise<unknown> => {
       if (message.type === "youtube/navigated") {
-        return await controller.navigated(sender.tab!.id!, message.videoId);
+        const identity = parseWatchUrl(sender.tab!.url ?? "");
+        return await controller.navigated(sender.tab!.id!, identity?.videoId ?? null);
       }
       if (message.type === "panel/start") return await controller.start(message);
       if (message.type === "panel/cancel") {
         return await controller.cancel(message.tabId, message.requestId);
+      }
+      if (message.type === "options/clear-summaries") {
+        await controller.clearSummaryCache();
+        return { cleared: true };
       }
       return controller.status(message.tabId);
     });
@@ -184,11 +200,16 @@ export default defineBackground(() => {
     extractTranscript: (tabId, requestId, context, preference) =>
       extractTranscriptWithContext(tabId, requestId, context, preference),
     cancelTranscript: cancelTranscriptExtraction,
+    summaryCache: browserSummaryCache,
     createProvider: (config) => createProvider(config),
     runPipeline: runSummaryPipeline,
     emit: (event) => hub.emit(event),
     browserLanguage: () => navigator.language
-  });
+  }, new JobRegistry(
+    () => crypto.randomUUID(),
+    () => Date.now(),
+    browserActiveJobStore
+  ));
 
   const configurePanel = () => browser.sidePanel.setPanelBehavior({
     openPanelOnActionClick: true
@@ -198,7 +219,7 @@ export default defineBackground(() => {
     browser.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
     browser.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
     configurePanel()
-  ]);
+  ]).then(() => controller.restoreInterruptedJobs());
   void ready.catch(() => undefined);
 
   // MV3 listeners are registered during initial evaluation; work awaits trusted storage setup.

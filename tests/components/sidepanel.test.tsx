@@ -338,11 +338,57 @@ describe("side panel", () => {
         startedAt: 1
       });
       render(<App client={fixture.client} />);
-      await screen.findByRole("button", { name: "Retry" });
+      await screen.findByText(state === "canceled" ? "Summary canceled" : "Summary interrupted");
+      expect(screen.queryByRole("button", { name: "Retry" }) !== null).toBe(state === "interrupted");
       expect(fixture.sendRuntimeMessage.mock.calls.filter(([message]) =>
         message.type === "panel/start")).toHaveLength(0);
     }
   );
+
+  it.each([
+    ["unsupported_page", []],
+    ["video_context_unavailable", ["Retry"]],
+    ["captions_unavailable", []],
+    ["transcript_extraction_failed", ["Retry"]],
+    ["configuration_missing", ["Open settings"]],
+    ["configuration_invalid", ["Open settings"]],
+    ["custom_permission_denied", ["Open settings"]],
+    ["credentials_rejected", ["Open settings"]],
+    ["insufficient_credits", ["Open settings"]],
+    ["provider_forbidden", ["Open settings"]],
+    ["rate_limited", ["Retry"]],
+    ["provider_unavailable", ["Retry"]],
+    ["network_unavailable", ["Retry"]],
+    ["network_timeout", ["Retry"]],
+    ["context_limit_exceeded", ["Open settings"]],
+    ["provider_output_invalid", ["Retry", "Change model"]],
+    ["content_filtered", []],
+    ["request_canceled", []],
+    ["request_interrupted", ["Retry"]],
+    ["internal_error", ["Retry"]]
+  ] as const)("renders the exhaustive safe action matrix for %s", async (code, actions) => {
+    const fixture = setup({
+      requestId: `error-${code}`,
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "error",
+      progress: null,
+      startedAt: 1,
+      error: {
+        code,
+        retryable: true,
+        safeMessage: "sk-proj-secret RAW PROVIDER BODY",
+        recoveryAction: "retry"
+      }
+    });
+    render(<App client={fixture.client} />);
+    await screen.findByRole("alert");
+
+    expect(document.body.textContent).not.toContain("sk-proj-secret");
+    for (const label of ["Retry", "Open settings", "Change model"]) {
+      expect(screen.queryByRole("button", { name: label }) !== null).toBe(actions.includes(label as never));
+    }
+  });
 
   it("does not render a completed snapshot for another video and starts the active video", async () => {
     const otherResult = {

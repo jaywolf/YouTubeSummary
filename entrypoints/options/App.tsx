@@ -42,7 +42,19 @@ type SettingsForm = {
 type AppProps = {
   settingsRepository?: SettingsRepository;
   permissions?: PermissionsAdapter;
+  clearSummaries?: () => Promise<void>;
 };
+
+async function clearBrowserSummaries(): Promise<void> {
+  const response: unknown = await browser.runtime.sendMessage({
+    type: "options/clear-summaries",
+    requestId: crypto.randomUUID()
+  });
+  if (!response || typeof response !== "object"
+      || (response as { cleared?: unknown }).cleared !== true) {
+    throw new Error("Cache clear was not acknowledged");
+  }
+}
 
 function formFromSettings(settings: ExtensionSettings): SettingsForm {
   const provider = settings.provider;
@@ -143,7 +155,8 @@ function CredentialControls({
 
 export function App({
   settingsRepository = browserSettingsRepository,
-  permissions = browserPermissionsAdapter
+  permissions = browserPermissionsAdapter,
+  clearSummaries = clearBrowserSummaries
 }: AppProps) {
   const [savedSettings, setSavedSettings] = useState<ExtensionSettings | null>(null);
   const [form, setForm] = useState<SettingsForm>(() => formFromSettings(DEFAULT_SETTINGS));
@@ -151,6 +164,7 @@ export function App({
   const [storageInvalid, setStorageInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [clearingSummaries, setClearingSummaries] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const connectionAbortRef = useRef<AbortController | null>(null);
@@ -312,6 +326,21 @@ export function App({
       setError("Stored settings could not be reset.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleClearSummaries() {
+    if (!window.confirm("Clear all cached summaries from this device?")) return;
+    setClearingSummaries(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await clearSummaries();
+      setStatus("Cached summaries cleared.");
+    } catch {
+      setError("Cached summaries could not be cleared.");
+    } finally {
+      setClearingSummaries(false);
     }
   }
 
@@ -521,6 +550,17 @@ export function App({
                 }))}
               />
             </label>
+
+            <div className="button-row">
+              <button
+                type="button"
+                className="danger"
+                disabled={clearingSummaries}
+                onClick={handleClearSummaries}
+              >
+                {clearingSummaries ? "Clearing…" : "Clear summaries"}
+              </button>
+            </div>
           </section>
 
           {error ? <p className="notice error" role="alert">{error}</p> : null}

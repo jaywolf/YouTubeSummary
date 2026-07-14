@@ -39,7 +39,7 @@ describe("background controller entrypoint", () => {
       type: "youtube/navigated",
       requestId: "navigation",
       tabId: 4,
-      videoId: "bbbbbbbbbbb"
+      videoId: "aaaaaaaaaaa"
     }, {
       id: "extension-id",
       url: "https://www.youtube.com/watch?v=bbbbbbbbbbb",
@@ -51,6 +51,7 @@ describe("background controller entrypoint", () => {
     await vi.waitFor(() => expect(controller.navigated).toHaveBeenCalledOnce());
     expect(controller.navigated).toHaveBeenCalledWith(91, "bbbbbbbbbbb");
     expect(controller.navigated).not.toHaveBeenCalledWith(4, expect.anything());
+    expect(controller.navigated).not.toHaveBeenCalledWith(91, "aaaaaaaaaaa");
   });
 
   it("rejects navigation from a non-YouTube or tabless sender", async () => {
@@ -142,6 +143,58 @@ describe("background controller entrypoint", () => {
     markReady();
     await vi.waitFor(() => expect(controller.start).toHaveBeenCalledOnce());
     expect(sendResponse).toHaveBeenCalledWith(null);
+  });
+
+  it("gates the first status until lifecycle restoration has installed interruption state", async () => {
+    const module = await importBackground();
+    let restore!: () => void;
+    const interrupted = {
+      requestId: "restored",
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "interrupted"
+    };
+    let restored = false;
+    const ready = new Promise<void>((resolve) => {
+      restore = () => {
+        restored = true;
+        resolve();
+      };
+    });
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(() => restored ? interrupted : null),
+      navigated: vi.fn(),
+      clearSummaryCache: vi.fn()
+    };
+    const listener = module.createBackgroundMessageListener(controller as never, ready);
+    const sendResponse = vi.fn();
+
+    expect(listener({ type: "panel/status", requestId: "status", tabId: 4 }, {}, sendResponse))
+      .toBe(true);
+    expect(controller.status).not.toHaveBeenCalled();
+    restore();
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith(interrupted));
+    expect(controller.status).toHaveBeenCalledWith(4);
+  });
+
+  it("routes cache clearing through the gated background controller", async () => {
+    const module = await importBackground();
+    const controller = {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      status: vi.fn(),
+      navigated: vi.fn(),
+      clearSummaryCache: vi.fn(async () => undefined)
+    };
+    const listener = module.createBackgroundMessageListener(controller as never);
+    const sendResponse = vi.fn();
+
+    expect(listener({ type: "options/clear-summaries", requestId: "clear" }, {}, sendResponse))
+      .toBe(true);
+    await vi.waitFor(() => expect(controller.clearSummaryCache).toHaveBeenCalledOnce());
+    expect(sendResponse).toHaveBeenCalledWith({ cleared: true });
   });
 
   it("broadcasts only through summary-panel ports and removes disconnected ports", async () => {

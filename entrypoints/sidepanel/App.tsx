@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { JobSnapshot } from "../../src/background/jobRegistry";
-import type { SafeAppError } from "../../src/domain/errors";
+import {
+  ERROR_PRESENTATIONS,
+  getErrorPresentation,
+  type SafeAppError
+} from "../../src/domain/errors";
 import type {
   AppMessage,
   BackgroundEvent,
@@ -68,9 +72,10 @@ function isSafeError(value: unknown): value is SafeAppError {
   if (!value || typeof value !== "object") return false;
   const error = value as Partial<SafeAppError>;
   return typeof error.code === "string"
+    && error.code in ERROR_PRESENTATIONS
     && typeof error.retryable === "boolean"
     && typeof error.safeMessage === "string"
-    && typeof error.recoveryAction === "string";
+    && ["retry", "settings", "change_model", "none"].includes(error.recoveryAction ?? "");
 }
 
 function parseSnapshot(value: unknown): JobSnapshot | null {
@@ -402,21 +407,26 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   }
 
   if (snapshot.state === "error") {
-    const settings = snapshot.error.recoveryAction === "settings";
+    const presentation = getErrorPresentation(snapshot.error);
     return (
       <main className="panel-shell panel-centered">
         <div className="brand-mark">YS</div>
         <p className="eyebrow">YouTube Detailed Summary</p>
-        <h1>{settings ? "Configuration required" : "Summary unavailable"}</h1>
-        <p className="state-message" role="alert">{snapshot.error.safeMessage}</p>
-        {settings ? (
+        <h1>{presentation.title}</h1>
+        <p className="state-message" role="alert">{presentation.message}</p>
+        {presentation.actions.includes("retry") ? (
+          <button className="primary-action" onClick={() => void start(true)}>Retry</button>
+        ) : null}
+        {presentation.actions.includes("settings") ? (
           <button className="primary-action" onClick={() => void client.openOptionsPage()}>
             Open settings
           </button>
-        ) : snapshot.error.retryable || snapshot.error.code === "provider_output_invalid" ? (
-          <button className="primary-action" onClick={() => void start(true)}>Retry</button>
         ) : null}
-        <button className="text-action" onClick={() => void client.openOptionsPage()}>Settings</button>
+        {presentation.actions.includes("change_model") ? (
+          <button className="text-action" onClick={() => void client.openOptionsPage()}>
+            Change model
+          </button>
+        ) : null}
       </main>
     );
   }
@@ -434,11 +444,14 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
   }
 
   if (snapshot.state !== "complete") {
+    const interrupted = snapshot.state === "interrupted";
     return (
       <main className="panel-shell panel-centered">
         <p className="eyebrow">YouTube Detailed Summary</p>
         <h1>{snapshot.state === "canceled" ? "Summary canceled" : "Summary interrupted"}</h1>
-        <button className="primary-action" onClick={() => void start(true)}>Retry</button>
+        {interrupted ? (
+          <button className="primary-action" onClick={() => void start(true)}>Retry</button>
+        ) : null}
       </main>
     );
   }
