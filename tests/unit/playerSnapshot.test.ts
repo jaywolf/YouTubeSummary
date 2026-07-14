@@ -130,6 +130,7 @@ describe("MAIN-world player reader", () => {
   });
 
   it("does not call a non-function player bridge", () => {
+    history.replaceState({}, "", "/watch?v=abcdefghijk");
     const player = document.createElement("div") as HTMLDivElement & { getPlayerResponse: unknown };
     player.id = "movie_player";
     player.getPlayerResponse = "not callable";
@@ -271,9 +272,9 @@ describe("MAIN-world player reader", () => {
     (window as typeof window & { ytplayer?: unknown }).ytplayer = {
       config: {
         args: {
-          raw_player_response: snapshotWithUrl(
+          raw_player_response: JSON.stringify(snapshotWithUrl(
             "https://www.youtube.com/api/timedtext?v=abcdefghijk"
-          )
+          ))
         }
       }
     };

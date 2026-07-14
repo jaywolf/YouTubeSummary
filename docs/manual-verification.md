@@ -50,7 +50,7 @@ Use public or explicitly authorized test videos. Do not record transcript conten
 | --- | --- | --- |
 | Human-captioned standard watch video | `https://www.youtube.com/watch?v=iG9CE55wbtY` | Reconfirm that a human caption track is still available immediately before the run. |
 | Automatic-caption standard watch video | `https://www.youtube.com/watch?v=Z1wrAhvanRU` | Reconfirm the automatic caption label immediately before the run; record the label, not transcript text. |
-| Video with no captions | `https://www.youtube.com/watch?v=aqz-KE-bpKQ` | Reconfirm that captions remain unavailable; expected to show a captions-unavailable recovery state. |
+| Video with no transcript | `https://www.youtube.com/watch?v=aqz-KE-bpKQ` | Reconfirm that YouTube provides neither usable timed text nor a transcript control; expected to show the non-retryable **No transcript available** state. |
 | Long captioned video | `https://www.youtube.com/watch?v=8mAITcNt710` | Reconfirm captions, then lower the configured context enough to force visible mapping progress. |
 | SPA navigation video A and video B | Not recorded | Both must be standard watch pages. |
 | Dedicated restricted live-provider key | Not recorded | Optional; record only provider/key label, never the value. |

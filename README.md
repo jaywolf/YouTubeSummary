@@ -98,7 +98,7 @@ The cache holds at most 20 entries and 5,000,000 serialized bytes, evicting olde
 - Structured, plain-text rendering; copy to clipboard; and timestamp buttons that seek the active matching video
 - YouTube single-page navigation detection, stale-job cancellation, and bounded local summary caching
 - JSON3 and legacy XML timed-text parsing from available YouTube caption tracks
-- Automatic opening and reading of YouTube's transcript panel when no usable direct track is available; the panel may briefly become visible on the page
+- Automatic opening and reading of YouTube's transcript panel when no usable direct track is available; the panel may open and remain visible on the page
 
 ## Known MVP limitations
 

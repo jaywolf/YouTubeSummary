@@ -36,18 +36,20 @@ export function readPlayerSnapshotInPage(): unknown {
         raw_player_response?: unknown;
       } } };
     };
-    candidates.push(globals.ytInitialPlayerResponse);
-    const configuredResponse = globals.ytplayer?.config?.args?.player_response;
-    if (typeof configuredResponse === "string") {
+    const addConfiguredCandidate = (candidate: unknown) => {
+      if (typeof candidate !== "string") {
+        candidates.push(candidate);
+        return;
+      }
       try {
-        candidates.push(JSON.parse(configuredResponse));
+        candidates.push(JSON.parse(candidate));
       } catch {
         // Ignore malformed page-owned data.
       }
-    } else {
-      candidates.push(configuredResponse);
-    }
-    candidates.push(globals.ytplayer?.config?.args?.raw_player_response);
+    };
+    candidates.push(globals.ytInitialPlayerResponse);
+    addConfiguredCandidate(globals.ytplayer?.config?.args?.player_response);
+    addConfiguredCandidate(globals.ytplayer?.config?.args?.raw_player_response);
 
     const currentUrl = new URL(location.href);
     const currentVideoId = currentUrl.pathname === "/watch"

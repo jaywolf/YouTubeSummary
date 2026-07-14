@@ -59,8 +59,10 @@ const DESCRIPTION_EXPAND_SELECTOR = [
   "ytd-watch-metadata tp-yt-paper-button#expand"
 ].join(",");
 
-const TRANSCRIPT_PANEL_SELECTOR =
-  "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript']";
+const TRANSCRIPT_PANEL_SELECTOR = [
+  "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript']",
+  "ytd-transcript-renderer"
+].join(",");
 
 type TranscriptReadTimings = {
   discoveryMs?: number;
@@ -93,11 +95,16 @@ function isVisible(value: Element): boolean {
   if (value instanceof HTMLElement && value.hidden) return false;
   if (value.closest("[hidden], [aria-hidden='true']") !== null) return false;
   const visibility = value.getAttribute("visibility")?.toUpperCase() ?? "";
-  return !visibility.includes("HIDDEN") && !visibility.includes("COLLAPSED");
+  if (visibility.includes("HIDDEN") || visibility.includes("COLLAPSED")) return false;
+  const computed = getComputedStyle(value);
+  return computed.display !== "none"
+    && computed.visibility !== "hidden"
+    && computed.visibility !== "collapse";
 }
 
 function transcriptPanels(root: ParentNode, visibleOnly: boolean): Element[] {
   return [...root.querySelectorAll(TRANSCRIPT_PANEL_SELECTOR)]
+    .filter((panel) => panel.parentElement?.closest(TRANSCRIPT_PANEL_SELECTOR) === null)
     .filter((panel) => !visibleOnly || isVisible(panel));
 }
 
@@ -114,7 +121,7 @@ function transcriptSignature(root: ParentNode, visibleOnly: boolean): string {
 
 /** Captures the old transcript DOM before a YouTube SPA navigation starts. */
 export function markTranscriptNavigationStart(root: ParentNode = document): void {
-  navigationTranscriptBaseline = transcriptSignature(root, false);
+  navigationTranscriptBaseline = transcriptSignature(root, true);
 }
 
 function clickable(root: ParentNode, selector: string): HTMLElement | null {

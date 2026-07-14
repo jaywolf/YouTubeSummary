@@ -293,7 +293,10 @@ describe("visible transcript parsing", () => {
     document.body.innerHTML = transcriptPanel(
       transcriptRow("0:00", "Old hidden transcript"),
       "visibility='ENGAGEMENT_PANEL_VISIBILITY_HIDDEN'"
-    ) + `<ytd-video-description-transcript-section-renderer>
+    ) + `<ytd-transcript-renderer style="display: none">
+      ${transcriptRow("0:01", "CSS-hidden transcript")}
+    </ytd-transcript-renderer>
+    <ytd-video-description-transcript-section-renderer>
       <button type="button">Show transcript</button>
     </ytd-video-description-transcript-section-renderer>`;
     document.querySelector("button")?.addEventListener("click", () => {
@@ -309,6 +312,22 @@ describe("visible transcript parsing", () => {
       { transcriptMs: 100, quietMs: 10 }
     )).resolves.toEqual([
       { startSeconds: 2, durationSeconds: 0, text: "Current visible transcript" }
+    ]);
+  });
+
+  it("reads YouTube's standalone transcript-renderer layout", async () => {
+    document.body.innerHTML = `<ytd-transcript-renderer>
+      ${transcriptRow("0:00", "Standalone transcript")}
+      ${transcriptRow("0:08", "Second standalone row")}
+    </ytd-transcript-renderer>`;
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal
+    )).resolves.toEqual([
+      { startSeconds: 0, durationSeconds: 8, text: "Standalone transcript" },
+      { startSeconds: 8, durationSeconds: 0, text: "Second standalone row" }
     ]);
   });
 
@@ -340,7 +359,7 @@ describe("visible transcript parsing", () => {
     ]);
   });
 
-  it("returns the latest usable rows when they arrive just before the deadline", async () => {
+  it("returns the latest usable rows at the deadline before the quiet period completes", async () => {
     document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
       <button type="button">Show transcript</button>
     </ytd-video-description-transcript-section-renderer>`;
@@ -349,14 +368,14 @@ describe("visible transcript parsing", () => {
         document.body.insertAdjacentHTML("beforeend", transcriptPanel(
           transcriptRow("0:05", "Late but usable")
         ));
-      }, 30);
+      }, 20);
     });
 
     await expect(readTranscriptFromPage(
       document,
       null,
       new AbortController().signal,
-      { transcriptMs: 40, quietMs: 30 }
+      { transcriptMs: 150, quietMs: 200 }
     )).resolves.toEqual([
       { startSeconds: 5, durationSeconds: 0, text: "Late but usable" }
     ]);
