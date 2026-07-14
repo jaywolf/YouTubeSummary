@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { StrictMode } from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -269,6 +271,31 @@ describe("side panel", () => {
     });
     expect(await screen.findByText("Creating final summary")).toBeTruthy();
     expect(screen.getByText("Synthesis 6 of 6")).toBeTruthy();
+  });
+
+  it("announces active progress updates politely", async () => {
+    const fixture = setup({
+      requestId: "accessible-progress",
+      tabId: 4,
+      videoId: "aaaaaaaaaaa",
+      state: "summarizing",
+      progress: { phase: "mapping", completed: 1, total: 4 },
+      startedAt: 1
+    });
+    render(<App client={fixture.client} />);
+
+    const progress = await screen.findByText("Chunk 2 of 3");
+    expect(progress.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("anchors the narrow-layout settings action to the summary header", () => {
+    const styles = readFileSync(
+      resolve(process.cwd(), "entrypoints/sidepanel/styles.css"),
+      "utf8"
+    );
+    const summaryHeaderRule = styles.match(/\.summary-header\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(summaryHeaderRule).toMatch(/\bposition:\s*relative\b/);
   });
 
   it("does not let a late start response overwrite a faster completion event", async () => {

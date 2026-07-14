@@ -292,6 +292,49 @@ describe("options settings", () => {
     expect(screen.getByText("Save provider changes before testing this connection.")).toBeTruthy();
   });
 
+  it("requires a new key and renewed disclosure when a saved custom origin changes", async () => {
+    const repository = memoryRepository(parseSettings({
+      provider: {
+        kind: "custom",
+        apiKey: "old-origin-synthetic-key",
+        model: "saved-model",
+        baseUrl: "https://saved.example/v1"
+      }
+    }));
+    const permissionAdapter = permissions();
+    render(<App settingsRepository={repository} permissions={permissionAdapter} />);
+
+    expect(await screen.findByText("Key saved")).toBeTruthy();
+    await userEvent.clear(screen.getByLabelText("Base URL"));
+    await userEvent.type(screen.getByLabelText("Base URL"), "https://new.example/v1");
+
+    expect(screen.queryByText("Key saved")).toBeNull();
+    const keyInput = screen.getByLabelText("API key") as HTMLInputElement;
+    const disclosure = screen.getByLabelText(/This local BYOK extension stores the key/) as HTMLInputElement;
+    expect(keyInput.value).toBe("");
+    expect(disclosure.checked).toBe(false);
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+
+    await userEvent.type(keyInput, "new-origin-synthetic-key");
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    await userEvent.click(disclosure);
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(permissionAdapter.request).toHaveBeenCalledWith({ origins: ["https://new.example/*"] });
+    expect(repository.saved.at(-1)?.provider).toEqual({
+      kind: "custom",
+      apiKey: "new-origin-synthetic-key",
+      model: "saved-model",
+      baseUrl: "https://new.example/v1"
+    });
+    expect(repository.saved.at(-1)?.provider).not.toEqual(expect.objectContaining({
+      apiKey: "old-origin-synthetic-key"
+    }));
+    expect(document.body.textContent).not.toContain("old-origin-synthetic-key");
+  });
+
   it.each(["Replace key", "Clear key"])(
     "aborts a pending connection test before %s mutates credentials",
     async (action) => {

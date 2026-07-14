@@ -449,7 +449,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
         <div className="spinner" />
         <p className="eyebrow">YouTube Detailed Summary</p>
         <h1>{phaseLabel(snapshot.state, snapshot.progress)}</h1>
-        <p className="state-message">{progressLabel(snapshot.progress)}</p>
+        <p className="state-message" aria-live="polite">{progressLabel(snapshot.progress)}</p>
         <button className="secondary-action" onClick={() => void cancel()}>Cancel</button>
       </main>
     );

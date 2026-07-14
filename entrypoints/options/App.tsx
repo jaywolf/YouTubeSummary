@@ -82,6 +82,22 @@ function customUrlError(baseUrl: string): string | null {
   }
 }
 
+function credentialDestinationMatches(
+  form: SettingsForm,
+  savedProvider: ProviderConfig | null
+): boolean {
+  if (savedProvider === null || form.providerKind !== savedProvider.kind) return false;
+  if (savedProvider.kind !== "custom") return true;
+
+  try {
+    const formOrigin = new URL(validateCustomBaseUrl(form.baseUrl)).origin;
+    const savedOrigin = new URL(savedProvider.baseUrl).origin;
+    return formOrigin === savedOrigin;
+  } catch {
+    return false;
+  }
+}
+
 function providerFormMatchesSaved(
   form: SettingsForm,
   savedProvider: ProviderConfig | null
@@ -190,8 +206,7 @@ export function App({
   }, [settingsRepository]);
 
   const savedProvider = savedSettings?.provider ?? null;
-  const hasSavedKey = form.providerKind !== "none"
-    && savedProvider?.kind === form.providerKind;
+  const hasSavedKey = credentialDestinationMatches(form, savedProvider);
   const needsKey = form.providerKind !== "none" && (!hasSavedKey || form.replacingKey);
   const providerRemovalPending = savedProvider !== null && form.providerKind === "none";
   const providerFieldsAreSaved = providerFormMatchesSaved(form, savedProvider);
