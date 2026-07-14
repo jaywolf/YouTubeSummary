@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const mode = process.argv[2] ?? "production";
 assert.match(mode, /^(production|test)$/);
-const output = mode === "test" ? ".output-test" : ".output";
+const output = mode === "test" ? "dist-test" : "dist";
 const manifestUrl = new URL(`../${output}/chrome-mv3/manifest.json`, import.meta.url);
 const manifest = JSON.parse(await readFile(manifestUrl, "utf8"));
 const background = await readFile(new URL(`../${output}/chrome-mv3/background.js`, import.meta.url), "utf8");

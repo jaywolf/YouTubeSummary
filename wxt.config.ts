@@ -3,7 +3,7 @@ import { defineConfig } from "wxt";
 const testMode = process.env.WXT_TEST_MODE === "1";
 
 export default defineConfig({
-  outDir: testMode ? ".output-test" : ".output",
+  outDir: testMode ? "dist-test" : "dist",
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "YouTube Detailed Summary",

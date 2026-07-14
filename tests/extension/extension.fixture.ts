@@ -11,7 +11,7 @@ type ExtensionFixtures = {
   server: MockServer;
 };
 
-const extensionPath = resolve(".output-test/chrome-mv3");
+const extensionPath = resolve("dist-test/chrome-mv3");
 
 export const test = base.extend<ExtensionFixtures>({
   server: async ({}, use) => {

@@ -17,7 +17,7 @@
     "test:manifest": "pnpm build && node tests/manifest.mjs production",
     "test:manifest:test": "pnpm build:test && node tests/manifest.mjs test",
     "test:extension": "pnpm build:test && playwright test",
-    "clean": "rm -rf .output .output-test",
+    "clean": "rm -rf dist dist-test",
     "check": "pnpm typecheck && pnpm test && pnpm test:manifest && pnpm test:manifest:test"
   },
   "dependencies": {

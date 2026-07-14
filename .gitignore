@@ -1,8 +1,8 @@
 .env
 .pi/
 node_modules/
-.output/
-.output-test/
+dist/
+dist-test/
 .wxt/
 coverage/
 playwright-report/

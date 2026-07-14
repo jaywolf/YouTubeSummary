@@ -31,14 +31,14 @@ Create a production unpacked build:
 pnpm build
 ```
 
-The unpacked production extension is written to `.output/chrome-mv3`.
+The unpacked production extension is written directly to the visible project directory `dist/chrome-mv3`.
 
 ### Chrome
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked**.
-4. Select this repository's `.output/chrome-mv3` directory.
+4. Select this repository's `dist/chrome-mv3` directory.
 5. Pin **YouTube Detailed Summary** if you want its action to remain visible.
 
 ### Brave
@@ -46,7 +46,7 @@ The unpacked production extension is written to `.output/chrome-mv3`.
 1. Open `brave://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked**.
-4. Select this repository's `.output/chrome-mv3` directory.
+4. Select this repository's `dist/chrome-mv3` directory.
 5. Pin **YouTube Detailed Summary** if desired.
 
 Rebuild and reload the extension from the browser's extensions page after source changes. See the current, deliberately unclaimed browser test matrix in [Manual verification](docs/manual-verification.md).

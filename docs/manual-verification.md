@@ -25,10 +25,10 @@ pnpm build
 Load the unpacked production directory:
 
 ```text
-.output/chrome-mv3
+dist/chrome-mv3
 ```
 
-In Chrome use `chrome://extensions`; in Brave use `brave://extensions`. Enable Developer mode, choose **Load unpacked**, and select `.output/chrome-mv3`. After rebuilding, click **Reload** for the extension before continuing.
+In Chrome use `chrome://extensions`; in Brave use `brave://extensions`. Enable Developer mode, choose **Load unpacked**, and select `dist/chrome-mv3`. After rebuilding, click **Reload** for the extension before continuing.
 
 Record the build environment before testing:
 

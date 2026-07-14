@@ -110,7 +110,8 @@ Extend .gitignore without removing its existing entries:
 .env
 .pi/
 node_modules/
-.output/
+dist/
+dist-test/
 .wxt/
 coverage/
 playwright-report/
@@ -371,7 +372,7 @@ createRoot(document.getElementById("root")!).render(
 
 Run: **pnpm typecheck && pnpm build**
 
-Expected: both commands exit 0 and .output/chrome-mv3/manifest.json contains manifest_version 3, side_panel.default_path, options_ui, and minimum_chrome_version 114.
+Expected: both commands exit 0 and dist/chrome-mv3/manifest.json contains manifest_version 3, side_panel.default_path, options_ui, and minimum_chrome_version 114.
 
 - [ ] **Step 6: Commit the foundation**
 
@@ -1180,7 +1181,7 @@ Expected: complete cached, navigation, interruption, and error behavior is indep
 
 **Interfaces:**
 - Produces: deterministic WXT_TEST_MODE build and Playwright extension fixture.
-- Consumes: built .output/chrome-mv3 package and all completed extension behavior.
+- Consumes: built dist/chrome-mv3 package and all completed extension behavior.
 
 - [ ] **Step 1: Configure a persistent Chromium extension fixture**
 
@@ -1271,7 +1272,7 @@ Expected: every command exits 0; production manifest has no localhost content-sc
 
 - [ ] **Step 6: Run and record the manual Chrome/Brave matrix**
 
-Load .output/chrome-mv3 as unpacked in current stable Chrome and Brave on macOS. Record exact versions and PASS/FAIL evidence in docs/manual-verification.md. Use dedicated low-limit test keys only for opt-in live smoke tests; do not record key values or raw authorization errors.
+Load dist/chrome-mv3 as unpacked in current stable Chrome and Brave on macOS. Record exact versions and PASS/FAIL evidence in docs/manual-verification.md. Use dedicated low-limit test keys only for opt-in live smoke tests; do not record key values or raw authorization errors.
 
 Expected: all acceptance rows pass or a concrete defect is filed and fixed before completion.
 
