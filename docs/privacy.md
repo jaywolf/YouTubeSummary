@@ -88,7 +88,7 @@ The extension does not request blanket all-site access at runtime. After validat
 
 Open the extension's **Settings** page:
 
-- **Clear key** confirms the action, then removes the entire provider configuration, including provider kind, API key, model ID, and custom base URL. It preserves summary preferences and cached summaries.
+- **Clear saved key** confirms the action, then removes the entire provider configuration, including provider kind, API key, model ID, and custom base URL. It preserves summary preferences and cached summaries. **Cancel replacement** discards only an unsaved replacement draft and keeps the saved provider.
 - **Reset stored settings** removes the provider and restores caption selection, output language, context limit, and cache preference to defaults. It does not clear cached summaries.
 - **Clear summaries** replaces the local cache with an empty cache. Turning **Cache summaries** off prevents cache reads and writes but does not erase entries already stored.
 

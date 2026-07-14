@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const rawSnapshot = {
   videoDetails: {
@@ -75,6 +75,10 @@ describe("background transcript bridge", () => {
 
   afterAll(() => {
     vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
   it("reads and sanitizes MAIN-world data before sending youtube/extract", async () => {

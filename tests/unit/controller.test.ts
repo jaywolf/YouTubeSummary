@@ -187,16 +187,14 @@ describe("SummaryController", () => {
     };
     const store = new ActiveJobStore(storage);
     const registry = new JobRegistry(() => "ordered", () => 123, store);
-    let fixture!: ReturnType<typeof setup>;
-    fixture = setup({
+    let stateAtCacheWrite: unknown;
+    let storedJobsAtCacheWrite: unknown;
+    const fixture = setup({
       summaryCache: {
         get: vi.fn(async () => null),
         set: vi.fn(async () => {
-          expect(fixture.controller.status(4)).toMatchObject({
-            requestId: "ordered",
-            state: "complete"
-          });
-          expect(storage.values[ACTIVE_JOBS_STORAGE_KEY]).toEqual({ version: 1, jobs: [] });
+          stateAtCacheWrite = fixture.controller.status(4);
+          storedJobsAtCacheWrite = structuredClone(storage.values[ACTIVE_JOBS_STORAGE_KEY]);
           return true;
         }),
         writeToken: vi.fn(() => 0),
@@ -210,6 +208,33 @@ describe("SummaryController", () => {
       expectedVideoId: "aaaaaaaaaaa",
       force: true
     })).resolves.toMatchObject({ state: "complete" });
+    expect(stateAtCacheWrite).toMatchObject({
+      requestId: "ordered",
+      state: "complete"
+    });
+    expect(storedJobsAtCacheWrite).toEqual({ version: 1, jobs: [] });
+  });
+
+  it("treats a cache read failure as a miss and continues summarization", async () => {
+    const fixture = setup({
+      summaryCache: {
+        get: vi.fn(async () => {
+          throw new Error("synthetic cache read failure");
+        }),
+        set: vi.fn(async () => true),
+        writeToken: vi.fn(() => 0),
+        clear: vi.fn(async () => undefined)
+      }
+    });
+
+    await expect(fixture.controller.start({
+      requestId: "cache-read-failure",
+      tabId: 4,
+      expectedVideoId: "aaaaaaaaaaa",
+      force: false
+    })).resolves.toMatchObject({ state: "complete" });
+    expect(fixture.dependencies.createProvider).toHaveBeenCalledOnce();
+    expect(fixture.dependencies.runPipeline).toHaveBeenCalledOnce();
   });
 
   it("does not emit an old completion after a newer start reserves the tab during cache commit", async () => {
@@ -431,7 +456,11 @@ describe("SummaryController", () => {
 
   it("does not call a provider for unsupported pages, missing settings, or caption failures", async () => {
     const unsupported = setup({
-      getTab: vi.fn(async (tabId) => ({ id: tabId, url: "https://www.youtube.com/" }))
+      getTab: vi.fn(async (tabId) => ({
+        id: tabId,
+        active: true,
+        url: "https://www.youtube.com/"
+      }))
     });
     await expect(unsupported.controller.start({ requestId: "unsupported", tabId: 4, expectedVideoId: "aaaaaaaaaaa", force: false }))
       .resolves.toMatchObject({ state: "error", error: { code: "unsupported_page" } });
@@ -666,6 +695,75 @@ describe("SummaryController", () => {
     await fixture.controller.navigated(4, "bbbbbbbbbbb");
     expect(fixture.controller.status(4)).toBeNull();
     expect(fixture.dependencies.extractTranscript).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose an older completed job after navigation cancels a newer reservation", async () => {
+    const secondContext = deferred<VideoContext | null>();
+    let tabReads = 0;
+    let contextReads = 0;
+    const fixture = setup({
+      getTab: vi.fn(async (tabId) => ++tabReads === 1
+        ? { id: tabId, active: true, url: contextA.canonicalUrl }
+        : { id: tabId, active: true, url: contextB.canonicalUrl }),
+      readVideoContext: vi.fn(async () => ++contextReads === 1
+        ? contextA
+        : secondContext.promise)
+    });
+    await fixture.controller.start({
+      requestId: "completed-a",
+      tabId: 4,
+      expectedVideoId: contextA.videoId,
+      force: true
+    });
+    const startB = fixture.controller.start({
+      requestId: "reserved-b",
+      tabId: 4,
+      expectedVideoId: contextB.videoId,
+      force: true
+    });
+    await vi.waitFor(() => expect(fixture.dependencies.readVideoContext).toHaveBeenCalledTimes(2));
+
+    await fixture.controller.navigated(4, "ccccccccccc");
+
+    expect(fixture.controller.status(4)).toBeNull();
+    secondContext.resolve(contextB);
+    await expect(startB).resolves.toBeNull();
+  });
+
+  it("does not reveal an older registry job after navigation clears a terminal preflight", async () => {
+    let tabReads = 0;
+    let contextReads = 0;
+    let settingsReads = 0;
+    const fixture = setup({
+      getTab: vi.fn(async (tabId) => ++tabReads === 1
+        ? { id: tabId, active: true, url: contextA.canonicalUrl }
+        : { id: tabId, active: true, url: contextB.canonicalUrl }),
+      readVideoContext: vi.fn(async () => ++contextReads === 1 ? contextA : contextB),
+      loadSettings: vi.fn(async () => {
+        if (++settingsReads === 1) return configured();
+        throw new Error("synthetic invalid settings");
+      })
+    });
+    await fixture.controller.start({
+      requestId: "completed-a",
+      tabId: 4,
+      expectedVideoId: contextA.videoId,
+      force: true
+    });
+    await expect(fixture.controller.start({
+      requestId: "preflight-b",
+      tabId: 4,
+      expectedVideoId: contextB.videoId,
+      force: true
+    })).resolves.toMatchObject({
+      requestId: "preflight-b",
+      state: "error",
+      error: { code: "configuration_invalid" }
+    });
+
+    await fixture.controller.navigated(4, "ccccccccccc");
+
+    expect(fixture.controller.status(4)).toBeNull();
   });
 
   it("rapid A-B-A navigation invalidates A without fabricating replacement work", async () => {

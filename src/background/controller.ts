@@ -332,7 +332,7 @@ export class SummaryController {
         if (job.signal.aborted || !this.#registry.isCurrent(job)) return this.status(request.tabId);
         cacheWriteToken = this.dependencies.summaryCache.writeToken();
         if (!request.force) {
-          const cached = await this.dependencies.summaryCache.get(cacheKey);
+          const cached = await this.dependencies.summaryCache.get(cacheKey).catch(() => null);
           if (job.signal.aborted || !this.#registry.isCurrent(job)) return this.status(request.tabId);
           if (cached !== null) {
             const cachedResult = completedSummaryPayloadSchema.parse({
@@ -463,20 +463,28 @@ export class SummaryController {
 
   async navigated(tabId: number, videoId: string | null): Promise<void> {
     const reservation = this.#reservations.get(tabId);
-    const current = this.status(tabId);
+    let changed = false;
     if (reservation !== undefined
         && (videoId === null || reservation.videoId !== videoId)) {
       await this.cancel(tabId, reservation.requestId);
       this.#preflight.delete(tabId);
-      this.#registry.invalidate(tabId, reservation.requestId);
-      await this.#registry.settled();
-      return;
+      changed = true;
     }
-    if (current !== null && current.videoId !== videoId) {
-      if (!isTerminal(current)) await this.cancel(tabId, current.requestId);
+
+    const visible = this.status(tabId);
+    if (visible !== null && visible.videoId !== videoId) {
+      if (!isTerminal(visible)) await this.cancel(tabId, visible.requestId);
       this.#preflight.delete(tabId);
-      this.#registry.invalidate(tabId, current.requestId);
-      await this.#registry.settled();
+      changed = true;
     }
+
+    const registered = this.#registry.status(tabId);
+    if (registered !== null && registered.videoId !== videoId) {
+      if (!isTerminal(registered)) await this.cancel(tabId, registered.requestId);
+      this.#registry.invalidate(tabId, registered.requestId);
+      changed = true;
+    }
+
+    if (changed) await this.#registry.settled();
   }
 }

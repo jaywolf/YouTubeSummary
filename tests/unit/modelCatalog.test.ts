@@ -124,6 +124,7 @@ describe("model catalog", () => {
       expect(String(thrown)).not.toContain(rawProviderBody);
     }
     expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
   it("preserves cancellation semantics without forwarding a fetcher error body", async () => {

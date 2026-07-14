@@ -304,10 +304,10 @@ describe("options settings", () => {
     expect(screen.queryByLabelText("API key")).toBeNull();
     expect(screen.queryByRole("button", { name: /reveal/i })).toBeNull();
     expect(screen.getByRole("button", { name: "Replace key" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Clear key" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear saved key" })).toBeTruthy();
   });
 
-  it("offers replace and confirmed clear without ever displaying a stored key", async () => {
+  it("offers replacement cancel and confirmed saved-key clearing without exposing the key", async () => {
     const repository = memoryRepository(parseSettings({
       provider: { kind: "openai", apiKey: "stored-synthetic-key", model: "test-model" }
     }));
@@ -320,7 +320,14 @@ describe("options settings", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Replace key" }));
     expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
-    await userEvent.click(screen.getByRole("button", { name: "Clear key" }));
+    await userEvent.type(screen.getByLabelText("API key"), "draft-synthetic-key");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel replacement" }));
+    expect(await screen.findByText("Key saved")).toBeTruthy();
+    expect(repository.clear).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("draft-synthetic-key");
+
+    await userEvent.click(screen.getByRole("button", { name: "Replace key" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clear saved key" }));
 
     expect(confirm).toHaveBeenCalledOnce();
     expect(repository.clear).toHaveBeenCalledOnce();
@@ -489,7 +496,7 @@ describe("options settings", () => {
     expect(document.body.textContent).not.toContain("old-origin-synthetic-key");
   });
 
-  it.each(["Replace key", "Clear key"])(
+  it.each(["Replace key", "Clear saved key"])(
     "aborts a pending connection test before %s mutates credentials",
     async (action) => {
       let requestSignal: AbortSignal | null = null;

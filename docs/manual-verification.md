@@ -87,7 +87,8 @@ These checks supplement the required matrix and should be recorded during the sa
 | --- | --- | --- | --- | --- |
 | - [ ] | Save a custom HTTPS provider and verify the browser prompt requests only its single validated origin, not blanket all-site runtime access. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | Deny a custom-origin permission and verify the provider settings are not saved. | NOT RUN | NOT RUN | Not recorded |
-| - [ ] | Click **Clear key** and verify the provider configuration is removed while preferences and cached summaries remain. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Click **Replace key**, enter a draft, then click **Cancel replacement** and verify the saved provider remains without revealing either key. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Click **Clear saved key** and verify the provider configuration is removed while preferences and cached summaries remain. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | Click **Clear summaries** and verify the local `summaryCache.v1` envelope has no entries. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | Turn caching off without clearing and verify old cache entries remain stored but are neither read nor updated. | NOT RUN | NOT RUN | Not recorded |
 

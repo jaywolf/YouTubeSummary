@@ -127,6 +127,7 @@ type CredentialControlsProps = {
   onApiKeyChange(value: string): void;
   onDisclosureChange(accepted: boolean): void;
   onReplace(): void;
+  onCancelReplacement(): void;
   onClear(): void;
 };
 
@@ -138,6 +139,7 @@ function CredentialControls({
   onApiKeyChange,
   onDisclosureChange,
   onReplace,
+  onCancelReplacement,
   onClear
 }: CredentialControlsProps) {
   if (!needsKey) {
@@ -146,7 +148,7 @@ function CredentialControls({
         <span aria-label="Credential status">Key saved</span>
         <div className="button-row">
           <button type="button" className="secondary" onClick={onReplace}>Replace key</button>
-          <button type="button" className="danger" onClick={onClear}>Clear key</button>
+          <button type="button" className="danger" onClick={onClear}>Clear saved key</button>
         </div>
       </div>
     );
@@ -173,9 +175,14 @@ function CredentialControls({
         <span>{DISCLOSURE}</span>
       </label>
       {hasSavedKey ? (
-        <button type="button" className="danger clear-replacement" onClick={onClear}>
-          Clear key
-        </button>
+        <div className="button-row clear-replacement">
+          <button type="button" className="secondary" onClick={onCancelReplacement}>
+            Cancel replacement
+          </button>
+          <button type="button" className="danger" onClick={onClear}>
+            Clear saved key
+          </button>
+        </div>
       ) : null}
     </>
   );
@@ -409,6 +416,23 @@ export function App({
     }
   }
 
+  function cancelCredentialReplacement() {
+    if (savedProvider === null) return;
+    cancelConnectionTest();
+    setManualModel(false);
+    setError(null);
+    setStatus(null);
+    setForm((current) => ({
+      ...current,
+      providerKind: savedProvider.kind,
+      baseUrl: savedProvider.kind === "custom" ? savedProvider.baseUrl : "",
+      model: savedProvider.model,
+      apiKey: "",
+      disclosureAccepted: false,
+      replacingKey: false
+    }));
+  }
+
   async function handleResetSettings() {
     if (!window.confirm("Reset all stored settings and remove any saved provider key?")) return;
     cancelConnectionTest();
@@ -635,6 +659,7 @@ export function App({
                     disclosureAccepted: false,
                     replacingKey: true
                   })}
+                  onCancelReplacement={cancelCredentialReplacement}
                   onClear={handleClearCredentials}
                 />
 

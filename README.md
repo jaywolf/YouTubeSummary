@@ -86,7 +86,7 @@ The extension appends `/chat/completions` to the saved base URL. The URL must us
 
 The cache holds at most 20 entries and 5,000,000 serialized bytes, evicting older entries as needed. **Regenerate** bypasses a cache read and replaces the matching cached result after successful generation. Turning caching off stops cache reads and writes but does not delete existing entries; use **Clear summaries** in Settings to erase them.
 
-**Clear key** removes the saved provider configuration, including its key, model, and custom base URL, while preserving summary preferences and existing cached summaries. **Reset stored settings** restores all settings defaults and removes the provider, but cached summaries must still be cleared separately.
+**Clear saved key** removes the saved provider configuration, including its key, model, and custom base URL, while preserving summary preferences and existing cached summaries. During replacement, **Cancel replacement** discards only the unsaved draft and restores the saved provider. **Reset stored settings** restores all settings defaults and removes the provider, but cached summaries must still be cleared separately.
 
 ## Supported flows
 

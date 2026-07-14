@@ -100,6 +100,16 @@ describe("parseAppMessage", () => {
     })).toThrow();
   });
 
+  it("rejects non-finite seek positions", () => {
+    expect(() => parseAppMessage({
+      type: "youtube/seek",
+      requestId: "seek-infinity",
+      tabId: 7,
+      videoId: "abcdefghijk",
+      seconds: Number.POSITIVE_INFINITY
+    })).toThrow();
+  });
+
   it("rejects invalid nested extraction context", () => {
     expect(() => parseAppMessage({
       type: "youtube/extract",
