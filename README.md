@@ -98,13 +98,13 @@ The cache holds at most 20 entries and 5,000,000 serialized bytes, evicting olde
 - Structured, plain-text rendering; copy to clipboard; and timestamp buttons that seek the active matching video
 - YouTube single-page navigation detection, stale-job cancellation, and bounded local summary caching
 - JSON3 and legacy XML timed-text parsing from available YouTube caption tracks
-- Automatic opening and reading of YouTube's transcript panel when no usable direct track is available; the panel may open and remain visible on the page
+- Automatic opening and reading of YouTube's transcript panel when no usable direct track is available; both legacy `ytd-transcript-segment-renderer` rows and the current **In this video** `transcript-segment-view-model` layout are supported, and the panel may open and remain visible on the page
 
 ## Known MVP limitations
 
 - Videos without a YouTube-provided transcript are not transcribed. The extension does not download audio or video and has no speech-to-text service.
 - Shorts, mobile YouTube, embedded players, channel/search pages, whole playlists, non-YouTube sites, and live streams without a stable transcript are unsupported.
-- Transcript discovery relies on YouTube player data and page markup that YouTube may change.
+- Transcript discovery relies on undocumented YouTube player data and page markup that YouTube may change. The fallback discovers the active transcript container from visible transcript rows instead of assuming that YouTube supplies a stable engagement-panel ID.
 - Native Anthropic, Gemini, and other provider-specific APIs are not implemented; use OpenRouter or a compatible endpoint where appropriate.
 - There is no account, cloud sync, shared summary, chat/Q&A, annotation, bookmark, or export workflow beyond copying rendered text.
 - Summary accuracy is limited by caption quality and the selected model. Generated text is paraphrased and may inherit caption or model errors.

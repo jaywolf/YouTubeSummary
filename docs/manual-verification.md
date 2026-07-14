@@ -1,14 +1,14 @@
 # Manual browser verification
 
 - **Verification date:** 2026-07-14
-- **Overall status:** NOT RUN
-- **Tester:** Not recorded
-- **Commit:** Not recorded
-- **macOS version:** Not recorded
+- **Overall status:** PARTIAL — targeted Brave transcript regression passed; the full cross-browser matrix remains open
+- **Tester:** Codex, using the existing user Brave window through macOS accessibility/computer control
+- **Commit:** Feature-branch checkpoint containing this evidence; the exact reviewed head is recorded in the PR verification comment
+- **macOS version:** 26.1 (25B78)
 - **Google Chrome exact version:** Not recorded (`chrome://version`)
-- **Brave exact version:** Not recorded (`brave://version`)
+- **Brave exact version:** 150.1.92.139
 
-This file is an evidence template, not a claim that browser testing passed. Every acceptance row remains unchecked and marked **NOT RUN** until a tester records the exact browser version, result, and reproducible evidence. Use `PASS`, `FAIL`, or `BLOCKED` only after performing the check; for failures, link or describe the filed defect without including credentials or raw authorization data.
+This file is an evidence record, not a claim that the full browser matrix passed. Keep a row unchecked until every subcheck in that row is complete; targeted evidence may be recorded as **PARTIAL PASS** without claiming the remaining subchecks. Use `PASS`, `FAIL`, or `BLOCKED` only after performing the corresponding check; for failures, link or describe the filed defect without including credentials or raw authorization data.
 
 ## Build under test
 
@@ -52,6 +52,7 @@ Use public or explicitly authorized test videos. Do not record transcript conten
 | Automatic-caption standard watch video | `https://www.youtube.com/watch?v=Z1wrAhvanRU` | Reconfirm the automatic caption label immediately before the run; record the label, not transcript text. |
 | Video with no transcript | `https://www.youtube.com/watch?v=aqz-KE-bpKQ` | Reconfirm that YouTube provides neither usable timed text nor a transcript control; expected to show the non-retryable **No transcript available** state. |
 | Long captioned video | `https://www.youtube.com/watch?v=8mAITcNt710` | Reconfirm captions, then lower the configured context enough to force visible mapping progress. |
+| Current **In this video** transcript layout | `https://www.youtube.com/watch?v=etduwo9Lu3M` | Verified on 2026-07-14 with direct timed text returning no usable segments and 120 current `transcript-segment-view-model` rows available after automatic panel reveal. |
 | SPA navigation video A and video B | Not recorded | Both must be standard watch pages. |
 | Dedicated restricted live-provider key | Not recorded | Optional; record only provider/key label, never the value. |
 | Local rate-limit mock | Not recorded | Custom endpoint that returns HTTP 429 and a safe retry response. |
@@ -68,7 +69,7 @@ Evidence can be a screenshot filename, screen recording timestamp, console captu
 | - [ ] | **Human captions:** open the human-captioned watch page, click the action, and verify a complete summary identifies the selected human caption track. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **Automatic captions:** summarize the automatic-caption video and verify the panel marks the caption track as automatic. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **No transcript:** open a video for which YouTube truly provides neither usable timed text nor a transcript control; verify **No transcript available** appears without a provider summary request. Distinguish this from the retryable **Transcript could not be read** state. | NOT RUN | NOT RUN | Not recorded |
-| - [ ] | **Automatic transcript reveal:** start with YouTube's transcript closed on a video whose direct caption-track path is unavailable, or use a controlled fixture. Start summarization and verify the extension opens the transcript automatically, reads it without a manual click, restores focus, and completes. Repeat while canceling and while navigating; verify no stale provider request, result, or cache entry. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Automatic transcript reveal:** start with YouTube's transcript closed on a video whose direct caption-track path is unavailable, or use a controlled fixture. Start summarization and verify the extension opens the transcript automatically, reads it without a manual click, restores focus, and completes. Repeat while canceling and while navigating; verify no stale provider request, result, or cache entry. | NOT RUN | PARTIAL PASS | On Brave 150.1.92.139, rebuilt and reloaded `dist/chrome-mv3`, reloaded `etduwo9Lu3M` with its transcript closed, invoked the extension from the existing toolbar menu, observed automatic **In this video → Transcript** reveal, **Reading YouTube transcript**, and a completed timestamped summary generated at 2026-07-14 12:53 PDT. Cancellation and navigation subchecks remain open. |
 | - [ ] | **Long video:** use an appropriate reduced context setting or sufficiently long transcript; verify sequential mapping progress followed by synthesis and a complete summary. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **Summary detail:** with the same captioned video, model, language, and context limit, save **Concise**, **Standard**, and **Detailed** in turn. Verify each value persists, each change causes a new generation rather than a cache hit, and the result follows the selected coverage style without invented or repeated content. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **SPA navigation:** start or complete video A, navigate in-page to video B, and verify A work is canceled/stale and A output never appears for B. | NOT RUN | NOT RUN | Not recorded |
@@ -97,6 +98,6 @@ These checks supplement the required matrix and should be recorded during the sa
 ## Final result
 
 - **Chrome:** NOT RUN
-- **Brave:** NOT RUN
+- **Brave:** PARTIAL PASS — current transcript-layout extraction and complete summary generation verified; remaining matrix rows are still unclaimed
 - **Open defects or blockers:** Not recorded
 - **Evidence location:** Not recorded

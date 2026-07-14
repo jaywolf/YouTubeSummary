@@ -120,11 +120,11 @@ Caption acquisition is isolated behind a `TranscriptSource` boundary because You
 The ordered local strategies are:
 
 1. Ask a minimal main-world function for the current player's serialized caption-track list, with matching initial/configured player responses as same-video fallbacks. Select a track, explicitly request YouTube's JSON3 timed-text format, and retain legacy XML parsing for compatibility.
-2. If direct timed text is unavailable, detect and open YouTube's transcript UI, wait for incrementally rendered segments to settle, read them, then restore focus. Leave either user-opened or extension-opened transcript UI visible so YouTube's state is not toggled behind the user.
+2. If direct timed text is unavailable, detect and open YouTube's transcript UI, wait for incrementally rendered segments to settle, read them, then restore focus. Support both the legacy `ytd-transcript-segment-renderer` layout and the current **In this video** `transcript-segment-view-model` layout. Discover the active transcript container from the rendered rows because current engagement panels may omit the historic `target-id`. Leave either user-opened or extension-opened transcript UI visible so YouTube's state is not toggled behind the user.
 
 Both strategies recheck cancellation and the active video identity while waiting. A navigation or cancellation ends the read as a canceled request; it cannot send stale transcript text to a provider or populate the cache. An advertised track or transcript control that cannot be parsed is a retryable extraction failure, while a video with neither source is reported as having no transcript.
 
-Both strategies are implementation details that can change without affecting provider or UI code. Fixture-backed tests cover known caption payloads and representative transcript DOM variants. Extraction failures include a strategy identifier in local diagnostics but expose only user-safe wording in the panel.
+Both strategies are implementation details that can change without affecting provider or UI code. Fixture-backed tests cover known caption payloads plus legacy, standalone, and modern transcript DOM variants. Extraction failures include a strategy identifier in local diagnostics but expose only user-safe wording in the panel.
 
 ### 6.4 Caption selection
 

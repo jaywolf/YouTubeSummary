@@ -20,10 +20,14 @@ function parseTimestamp(value: string): number | null {
 export function readVisibleTranscript(root: ParentNode = document): TranscriptSegment[] {
   const values: Array<{ startSeconds: number; text: string }> = [];
 
-  for (const renderer of root.querySelectorAll("ytd-transcript-segment-renderer")) {
-    const timestamp = renderer.querySelector(".segment-timestamp, [id='segment-timestamp']")
-      ?.textContent;
-    const text = renderer.querySelector(".segment-text, [id='segment-text']")?.textContent;
+  for (const renderer of root.querySelectorAll(TRANSCRIPT_SEGMENT_SELECTOR)) {
+    const modern = renderer.matches("transcript-segment-view-model");
+    const timestamp = renderer.querySelector(modern
+      ? ".ytwTranscriptSegmentViewModelTimestamp"
+      : ".segment-timestamp, [id='segment-timestamp'], [id='segment-time']")?.textContent;
+    const text = renderer.querySelector(modern
+      ? "span.ytAttributedStringHost[role='text'], .ytAttributedStringHost[role='text'], .yt-core-attributed-string[role='text'], span[role='text']"
+      : ".segment-text, [id='segment-text']")?.textContent;
     if (timestamp === undefined || text === undefined || timestamp === null || text === null) {
       continue;
     }
@@ -42,6 +46,11 @@ export function readVisibleTranscript(root: ParentNode = document): TranscriptSe
     };
   });
 }
+
+const TRANSCRIPT_SEGMENT_SELECTOR = [
+  "ytd-transcript-segment-renderer",
+  "transcript-segment-view-model"
+].join(",");
 
 const TRANSCRIPT_TRIGGER_SELECTOR = [
   "ytd-video-description-transcript-section-renderer button",
@@ -103,7 +112,17 @@ function isVisible(value: Element): boolean {
 }
 
 function transcriptPanels(root: ParentNode, visibleOnly: boolean): Element[] {
-  return [...root.querySelectorAll(TRANSCRIPT_PANEL_SELECTOR)]
+  const candidates = [...root.querySelectorAll(TRANSCRIPT_PANEL_SELECTOR)];
+  for (const row of root.querySelectorAll("transcript-segment-view-model")) {
+    const modernContainer = row.closest([
+      "yt-section-list-renderer",
+      "ytd-engagement-panel-section-list-renderer",
+      "ytd-transcript-renderer"
+    ].join(","));
+    if (modernContainer !== null) candidates.push(modernContainer);
+  }
+
+  return [...new Set(candidates)]
     .filter((panel) => panel.parentElement?.closest(TRANSCRIPT_PANEL_SELECTOR) === null)
     .filter((panel) => !visibleOnly || isVisible(panel));
 }
@@ -114,7 +133,7 @@ function readCurrentTranscript(root: ParentNode): TranscriptSegment[] {
 
 function transcriptSignature(root: ParentNode, visibleOnly: boolean): string {
   return transcriptPanels(root, visibleOnly)
-    .flatMap((panel) => [...panel.querySelectorAll("ytd-transcript-segment-renderer")])
+    .flatMap((panel) => [...panel.querySelectorAll(TRANSCRIPT_SEGMENT_SELECTOR)])
     .map((renderer) => renderer.textContent ?? "")
     .join("\u0000");
 }
@@ -292,7 +311,7 @@ export async function readTranscriptFromPage(
 
     let trigger = clickable(root, TRANSCRIPT_TRIGGER_SELECTOR);
     let expand = clickable(root, DESCRIPTION_EXPAND_SELECTOR);
-    let panelExists = root.querySelector(TRANSCRIPT_PANEL_SELECTOR) !== null;
+    let panelExists = transcriptPanels(root, false).length > 0;
     if (trigger === null && expand === null && !panelExists) {
       const discovered = await waitForValue(
         root,
@@ -301,7 +320,7 @@ export async function readTranscriptFromPage(
         () => {
           const delayedTrigger = clickable(root, TRANSCRIPT_TRIGGER_SELECTOR);
           const delayedExpand = clickable(root, DESCRIPTION_EXPAND_SELECTOR);
-          const delayedPanel = root.querySelector(TRANSCRIPT_PANEL_SELECTOR) !== null;
+          const delayedPanel = transcriptPanels(root, false).length > 0;
           return delayedTrigger !== null || delayedExpand !== null || delayedPanel
             ? { trigger: delayedTrigger, expand: delayedExpand, panelExists: delayedPanel }
             : null;
@@ -321,7 +340,7 @@ export async function readTranscriptFromPage(
         timings.discoveryMs ?? 3_000,
         () => {
           const delayedTrigger = clickable(root, TRANSCRIPT_TRIGGER_SELECTOR);
-          const delayedPanel = root.querySelector(TRANSCRIPT_PANEL_SELECTOR) !== null;
+          const delayedPanel = transcriptPanels(root, false).length > 0;
           return delayedTrigger !== null || delayedPanel
             ? { trigger: delayedTrigger, panelExists: delayedPanel }
             : null;

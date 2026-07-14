@@ -156,6 +156,35 @@ describe("visible transcript parsing", () => {
     ]);
   });
 
+  it("reads YouTube's modern transcript view-model rows", () => {
+    document.body.innerHTML = readFileSync(
+      "tests/fixtures/visible-transcript-modern.html",
+      "utf8"
+    );
+
+    expect(readVisibleTranscript(document)).toEqual([
+      { startSeconds: 0, durationSeconds: 9, text: "Modern first segment" },
+      { startSeconds: 9, durationSeconds: 0, text: "Modern second segment" }
+    ]);
+  });
+
+  it("finds a visible modern transcript inside an unlabelled engagement panel", async () => {
+    document.body.innerHTML = readFileSync(
+      "tests/fixtures/visible-transcript-modern.html",
+      "utf8"
+    );
+
+    await expect(readTranscriptFromPage(
+      document,
+      null,
+      new AbortController().signal,
+      { discoveryMs: 20, transcriptMs: 20, quietMs: 5 }
+    )).resolves.toEqual([
+      { startSeconds: 0, durationSeconds: 9, text: "Modern first segment" },
+      { startSeconds: 9, durationSeconds: 0, text: "Modern second segment" }
+    ]);
+  });
+
   it("opens YouTube's transcript section when segments are not rendered yet", async () => {
     document.body.innerHTML = `<ytd-video-description-transcript-section-renderer>
       <button type="button">Show transcript</button>
