@@ -51,6 +51,8 @@ The unpacked production extension is written directly to the visible project dir
 
 Rebuild and reload the extension from the browser's extensions page after source changes. See the current, deliberately unclaimed browser test matrix in [Manual verification](docs/manual-verification.md).
 
+The extension uses the **Play Notes** icon: a red play symbol flowing into warm summary lines on charcoal. Its vector source and 16/32/48/128-pixel browser assets live in `public/icon`; WXT copies them into `dist/chrome-mv3/icon` during every build. If a previously loaded unpacked extension still shows the old placeholder after `pnpm build`, click **Reload** on its `chrome://extensions` or `brave://extensions` card. Remove and load the same `dist/chrome-mv3` directory again only if the browser's icon cache remains stale.
+
 ## Configure a provider
 
 Open the extension's **Settings** page, select a provider, enter an API key, accept the local-key disclosure, choose a model, then save. For OpenAI and OpenRouter, the model chooser is loaded directly from that provider's authenticated models API; the extension displays a readable name and stores the provider's exact model ID internally. A saved key cannot be revealed or copied from the UI; it can only be replaced or cleared. **Test connection** becomes available after the provider settings are saved.

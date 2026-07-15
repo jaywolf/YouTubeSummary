@@ -61,15 +61,12 @@ button { font: inherit; }
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   width: 44px;
   height: 44px;
-  place-items: center;
   margin-bottom: 8px;
-  border: 1px solid #45423c;
   border-radius: 13px;
-  color: #d8cda8;
-  font-family: Georgia, serif;
+  object-fit: contain;
 }
 
 .spinner {

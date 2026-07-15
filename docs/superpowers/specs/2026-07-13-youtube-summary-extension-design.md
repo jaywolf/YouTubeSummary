@@ -70,6 +70,12 @@ The rendered result contains:
 
 The MVP does not present generated prose as direct quotation. It avoids a "notable quotes" section because caption accuracy and model paraphrasing make quote fidelity difficult to guarantee.
 
+### 4.4 Extension identity
+
+The extension uses the approved **Play Notes** mark across Chrome/Brave extension surfaces and the centered side-panel brand position. A red play triangle flows into three warm-cream summary lines on a charcoal rounded square, connecting the video source to the written-summary result without copying YouTube's exact logo or wordmark.
+
+The reviewed SVG is the geometry source of truth. WXT packages raster renditions at 16, 32, 48, and 128 pixels; the manifest declares the complete extension icon map and 16/32/48 toolbar-action map. The in-panel rendition is decorative because the adjacent eyebrow already identifies YouTube Detailed Summary. The options page retains its existing textual heading and does not add a redundant logo slot.
+
 ## 5. Architecture
 
 Use WXT with React and TypeScript to generate a Manifest V3 extension. WXT owns extension entrypoint discovery, manifest generation, browser builds, and local development. React owns the side-panel and settings interfaces. Framework-independent TypeScript modules own domain behavior so extraction, chunking, providers, cache logic, and error mapping can be unit tested without a browser UI.

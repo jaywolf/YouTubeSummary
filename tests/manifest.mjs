@@ -12,6 +12,33 @@ const content = await readFile(
   "utf8"
 );
 
+const extensionIcons = {
+  "16": "icon/16.png",
+  "32": "icon/32.png",
+  "48": "icon/48.png",
+  "128": "icon/128.png"
+};
+const actionIcons = {
+  "16": "icon/16.png",
+  "32": "icon/32.png",
+  "48": "icon/48.png"
+};
+
+assert.deepEqual(manifest.icons, extensionIcons,
+  "manifest must declare every packaged Play Notes icon size");
+assert.deepEqual(manifest.action?.default_icon, actionIcons,
+  "toolbar action must declare the Play Notes toolbar icon sizes");
+
+for (const [declaredSize, relativePath] of Object.entries(extensionIcons)) {
+  const png = await readFile(new URL(`../${output}/chrome-mv3/${relativePath}`, import.meta.url));
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10],
+    `${relativePath} must be a PNG file`);
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  assert.deepEqual([width, height], [Number(declaredSize), Number(declaredSize)],
+    `${relativePath} must match its declared square dimensions`);
+}
+
 assert.equal(
   manifest.options_ui?.open_in_tab,
   true,

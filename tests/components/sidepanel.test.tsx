@@ -197,7 +197,12 @@ describe("side panel", () => {
       }
     });
     render(<App client={configuration.client} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Open settings" }));
+    const openSettings = await screen.findByRole("button", { name: "Open settings" });
+    const brandMark = document.querySelector<HTMLImageElement>("img.brand-mark");
+    expect(brandMark?.getAttribute("src")).toBe("/icon/128.png");
+    expect(brandMark?.getAttribute("alt")).toBe("");
+    expect(screen.queryByText("YS")).toBeNull();
+    await userEvent.click(openSettings);
     expect(configuration.client.openOptionsPage).toHaveBeenCalledOnce();
     expect(configuration.sendRuntimeMessage.mock.calls.filter(([message]) =>
       message.type === "panel/start")).toHaveLength(0);

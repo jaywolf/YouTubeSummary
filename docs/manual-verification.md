@@ -63,6 +63,7 @@ Evidence can be a screenshot filename, screen recording timestamp, console captu
 
 | Done | Check | Chrome result | Brave result | Evidence / notes |
 | --- | --- | --- | --- | --- |
+| - [ ] | **Extension identity:** after rebuilding and reloading `dist/chrome-mv3`, verify the Play Notes icon appears crisply in the extensions page, toolbar/extensions menu, browser-supplied side-panel header, and the centered in-panel error state. Check both light and dark browser chrome where available. | NOT RUN | NOT RUN | Confirm that no `YS` placeholder remains. If the browser retains an old icon, remove and reload the same unpacked directory once before filing a defect. |
 | - [ ] | **OpenAI model catalog:** enter a dedicated OpenAI key, accept the disclosure, and verify the readable model chooser loads from the authenticated provider API; refresh it and save a selection without exposing the key or requiring a typed model ID. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **OpenRouter model catalog:** enter a dedicated OpenRouter key, accept the disclosure, and verify the readable compatible-text model chooser loads from the authenticated provider API; refresh it and save a selection without exposing the key or requiring a typed model ID. | NOT RUN | NOT RUN | Not recorded |
 | - [ ] | **Advanced model fallback:** enable **Use a model not shown**, verify an exact provider ID can be entered manually, then disable it and verify the API-backed chooser returns. | NOT RUN | NOT RUN | Not recorded |

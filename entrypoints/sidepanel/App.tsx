@@ -422,7 +422,7 @@ export function App({ client = browserClient }: { client?: PanelClient }) {
     const presentation = getErrorPresentation(snapshot.error);
     return (
       <main className="panel-shell panel-centered">
-        <div className="brand-mark">YS</div>
+        <img className="brand-mark" src="/icon/128.png" alt="" />
         <p className="eyebrow">YouTube Detailed Summary</p>
         <h1>{presentation.title}</h1>
         <p className="state-message" role="alert">{presentation.message}</p>
