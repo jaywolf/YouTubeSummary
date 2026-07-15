@@ -1,7 +1,7 @@
 # YouTube Summary Extension Design
 
 **Date:** 2026-07-13  
-**Status:** Approved by the user on 2026-07-13
+**Status:** Approved by the user on 2026-07-13; implementation updated on 2026-07-14 to use live authenticated OpenAI and OpenRouter model catalogs
 **Target:** Google Chrome 114+ and current Brave releases with Chromium extension compatibility
 
 ## 1. Product Summary
@@ -44,7 +44,7 @@ The side panel follows the supplied reference: dark, calm, reading-focused, and 
 3. The native side panel opens.
 4. If no provider is configured, the panel shows a short setup explanation and an **Open settings** action.
 5. If configuration is valid, the extension identifies the video and obtains its preferred caption track.
-6. A cached summary is shown immediately when its cache key matches the current video, caption language, provider, model, output-language setting, and prompt version.
+6. A cached summary is shown immediately when its cache key matches the current video, caption language, provider, model, output-language setting, summary-detail setting, and prompt version.
 7. Otherwise, summarization starts automatically. The panel reports transcript extraction, chunk progress for long videos, and synthesis progress.
 8. The final summary renders as safe structured content with timestamp links that seek the active YouTube player.
 
@@ -62,13 +62,19 @@ The side panel follows the supplied reference: dark, calm, reading-focused, and 
 
 The rendered result contains:
 
-1. A two-to-four paragraph overview.
-2. Five to ten key takeaways.
-3. A detailed topical breakdown ordered by the video's chronology.
+1. An overview whose length follows the selected **Concise**, **Standard**, or **Detailed** preference.
+2. Key takeaways targeted at 3–5 for Concise, 5–10 for Standard, and 8–12 for Detailed when supported by the captions.
+3. A chronological topical breakdown limited to major sections for Concise and expanded to comprehensive meaningful coverage for Detailed.
 4. Timestamp links for each topical section and for important supporting points when the transcript provides useful timing.
 5. A short note that the summary was generated from captions and may inherit caption errors.
 
 The MVP does not present generated prose as direct quotation. It avoids a "notable quotes" section because caption accuracy and model paraphrasing make quote fidelity difficult to guarantee.
+
+### 4.4 Extension identity
+
+The extension uses the approved **Play Notes** mark across Chrome/Brave extension surfaces and the centered side-panel brand position. A red play triangle flows into three warm-cream summary lines on a charcoal rounded square, connecting the video source to the written-summary result without copying YouTube's exact logo or wordmark.
+
+The reviewed SVG is the geometry source of truth. WXT packages raster renditions at 16, 32, 48, and 128 pixels; the manifest declares the complete extension icon map and 16/32/48 toolbar-action map. The in-panel rendition is decorative because the adjacent eyebrow already identifies YouTube Detailed Summary. The options page retains its existing textual heading and does not add a redundant logo slot.
 
 ## 5. Architecture
 
@@ -79,7 +85,7 @@ Use WXT with React and TypeScript to generate a Manifest V3 extension. WXT owns 
 | Context | Responsibility |
 | --- | --- |
 | Side panel | Render current state, initiate or cancel summarization, stream progress, copy output, open settings, and send timestamp seek commands. |
-| Options page | Configure provider, API key, model, custom base URL, caption preference, output language, and cache behavior; test the selected provider; clear credentials and cached summaries. |
+| Options page | Configure provider, API key, API-backed model selection, custom base URL, caption preference, output language, summary detail, and cache behavior; test the selected provider; clear credentials and cached summaries. |
 | Background service worker | Orchestrate jobs, enforce one active job per tab, call providers, manage cancellation, perform caching, map errors, and keep API keys out of the YouTube page context. |
 | YouTube content script | Validate the page, report video metadata, request sanitized caption-track data from the page context, extract the visible transcript as fallback, and seek the player to a timestamp. It never reads provider credentials. |
 | Main-world bridge | Read the minimum player response needed to identify caption tracks and return a sanitized serializable object. It does not retain state, call providers, or expose extension data to the page. |
@@ -119,10 +125,12 @@ Caption acquisition is isolated behind a `TranscriptSource` boundary because You
 
 The ordered local strategies are:
 
-1. Ask a minimal main-world function for the current player's serialized caption-track list. Select a track, fetch its YouTube timed-text URL, and parse timed segments.
-2. If player caption data is unavailable, detect and open YouTube's visible transcript UI, read its rendered segments, then restore focus without closing user-opened UI.
+1. Ask a minimal main-world function for the current player's serialized caption-track list, with matching initial/configured player responses as same-video fallbacks. Select a track, explicitly request YouTube's JSON3 timed-text format, and retain legacy XML parsing for compatibility.
+2. If direct timed text is unavailable, detect and open YouTube's transcript UI, wait for incrementally rendered segments to settle, read them, then restore focus. Support both the legacy `ytd-transcript-segment-renderer` layout and the current **In this video** `transcript-segment-view-model` layout. Discover the active transcript container from the rendered rows because current engagement panels may omit the historic `target-id`. Leave either user-opened or extension-opened transcript UI visible so YouTube's state is not toggled behind the user.
 
-Both strategies are implementation details that can change without affecting provider or UI code. Fixture-backed tests cover known caption payloads and representative transcript DOM variants. Extraction failures include a strategy identifier in local diagnostics but expose only user-safe wording in the panel.
+Both strategies recheck cancellation and the active video identity while waiting. A navigation or cancellation ends the read as a canceled request; it cannot send stale transcript text to a provider or populate the cache. An advertised track or transcript control that cannot be parsed is a retryable extraction failure, while a video with neither source is reported as having no transcript.
+
+Both strategies are implementation details that can change without affecting provider or UI code. Fixture-backed tests cover known caption payloads plus legacy, standalone, and modern transcript DOM variants. Extraction failures include a strategy identifier in local diagnostics but expose only user-safe wording in the panel.
 
 ### 6.4 Caption selection
 
@@ -163,7 +171,8 @@ The prompt instructs the model to:
 - return structured JSON matching the extension's provider-neutral summary schema;
 - use timestamps drawn from supplied segment boundaries;
 - paraphrase rather than fabricate direct quotes;
-- produce the configured output language.
+- produce the configured output language; and
+- target the configured Concise, Standard, or Detailed level in both direct and long-video final synthesis prompts.
 
 ### 7.2 Summary schema
 
@@ -206,8 +215,8 @@ Chunk requests run sequentially in the MVP. This makes cancellation, provider ra
 
 | Provider | Endpoint behavior | Required settings |
 | --- | --- | --- |
-| OpenAI | Native Responses API adapter | API key and model ID |
-| OpenRouter | OpenAI-compatible Chat Completions adapter at the fixed OpenRouter base URL | API key and OpenRouter model slug |
+| OpenAI | Native Responses API adapter; authenticated model discovery through `GET /v1/models` | API key and a catalog-selected exact model ID, with an advanced manual fallback |
+| OpenRouter | OpenAI-compatible Chat Completions adapter at the fixed OpenRouter base URL; authenticated compatible-text model discovery through `GET /api/v1/models` | API key and a catalog-selected exact model ID, with an advanced manual fallback |
 | Custom | OpenAI-compatible Chat Completions adapter | HTTPS base URL, API key, and model ID |
 
 The custom base URL must use HTTPS except for `http://localhost` and `http://127.0.0.1`, which are allowed for local development. It may include a path prefix but must not contain credentials, query parameters, or fragments.
@@ -228,8 +237,10 @@ The UI never branches on provider-specific response bodies.
 
 ### 8.3 Model selection
 
-- OpenAI uses a user-editable model ID with a documented initial suggestion rather than a permanently hard-coded "latest" alias.
-- OpenRouter loads the current model catalog only after the user supplies a valid key, caches it briefly, and still permits manual model-slug entry.
+- OpenAI and OpenRouter never use a bundled static model-ID list. The settings page requests each provider's current authenticated model catalog after the user accepts the BYOK disclosure.
+- The chooser displays a readable provider name when available while storing and sending the provider's exact returned ID internally.
+- Saved credentials may refresh their provider catalog automatically. A new unsaved key is not transmitted until the user accepts the local-key disclosure.
+- Catalog loading has safe loading, empty, and failure states plus an explicit **Use a model not shown** advanced fallback.
 - Custom endpoints use manual model entry in the MVP; model discovery is not assumed.
 
 The extension does not silently change the selected model.
@@ -256,6 +267,7 @@ Persist:
 - validated custom base URL;
 - caption preference;
 - output language;
+- summary-detail preference;
 - model context-limit setting;
 - cache preference and bounded summary cache;
 - non-secret schema and prompt versions.
@@ -266,7 +278,7 @@ Do not persist raw transcripts, request authorization headers, partial provider 
 
 Browser extension storage is not a secure secret vault, and OpenAI advises against exposing API keys in client-side applications. Before saving a key, settings must disclose that this developer-oriented local BYOK design carries client-side key risk. Documentation recommends a dedicated restricted key, low usage limits where the provider supports them, and immediate key rotation if exposure is suspected.
 
-The API key field is masked after save. The extension provides **Replace key** and **Clear key**, never a reveal or copy-key action.
+The API key field is masked after save. The extension provides **Replace key**, non-destructive **Cancel replacement**, and confirmed **Clear saved provider** actions, never a reveal or copy-key action.
 
 ### 9.3 Permissions
 
@@ -298,6 +310,7 @@ Cache only completed validated summaries. The cache key includes:
 - provider base-origin identifier for custom endpoints, excluding credentials;
 - model ID;
 - output language;
+- summary-detail preference;
 - prompt version;
 - summary schema version.
 
@@ -371,8 +384,8 @@ The MVP is complete when all of the following are true:
 
 1. The unpacked extension loads without manifest or console errors in supported Chrome and Brave versions.
 2. Clicking the toolbar icon opens a native side panel on a YouTube watch page.
-3. The extension detects unsupported pages and videos without captions without making an LLM request.
-4. A configured OpenAI, OpenRouter, or custom OpenAI-compatible provider can generate a validated detailed summary from available captions.
+3. The extension detects unsupported pages and videos without a YouTube-provided transcript without making an LLM request.
+4. A configured OpenAI, OpenRouter, or custom OpenAI-compatible provider can generate a validated summary from an available YouTube transcript.
 5. The summary includes the defined overview, takeaways, topical sections, and working timestamp links.
 6. Long transcripts complete through the bounded map-and-synthesize flow.
 7. Canceling or navigating prevents stale work from replacing current results or populating the cache.

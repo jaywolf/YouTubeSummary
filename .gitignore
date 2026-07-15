@@ -1,4 +1,12 @@
 .env
 .pi/
+.superpowers/
 node_modules/
+dist/
+dist-test/
+.wxt/
+coverage/
+playwright-report/
+test-results/
+pnpm-debug.log*
 docs/reviews/

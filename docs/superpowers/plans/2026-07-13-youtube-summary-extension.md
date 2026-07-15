@@ -8,6 +8,8 @@
 
 **Tech Stack:** Node.js 22+, pnpm 11.13.0, TypeScript 7.0.2, WXT 0.20.27, React 19.2.7, Zod 4.4.3, Vitest 4.1.10, Testing Library 16.3.2, and Playwright 1.61.1.
 
+**Implementation status (2026-07-14):** The plan has been implemented on `feature/ytsummary-extension`. Its step checkboxes are preserved as the approved execution record rather than live completion claims; current build and manual-browser evidence lives in `README.md` and `docs/manual-verification.md`. The implemented settings UX improves the original plan by loading OpenAI and OpenRouter model IDs from their authenticated APIs instead of shipping or requiring a static/manual ID list, and adds a persisted Concise/Standard/Detailed summary-detail preference with cache-safe prompt behavior. Post-plan extraction hardening explicitly requests/parses YouTube JSON3 timed text, uses same-video player-response fallbacks, automatically reveals and waits for a lazy transcript panel with cancellation and SPA identity checks, and supports both YouTube's legacy transcript renderers and its current **In this video** transcript view-model rows even when their engagement panel has no stable `target-id`.
+
 ## Global Constraints
 
 - Target Google Chrome 114+ and current Brave releases that support Chromium Manifest V3 extensions.
@@ -53,6 +55,7 @@
 - **src/providers/retry.ts** — retry classification and bounded delay.
 - **src/providers/providerErrors.ts** — safe provider error normalization.
 - **src/providers/factory.ts** — validated provider construction.
+- **src/providers/modelCatalog.ts** — authenticated OpenAI/OpenRouter catalog loading, bounded parsing, readable labels, and exact provider IDs.
 - **src/summarization/prompts.ts** — prompt constants and transcript delimiters.
 - **src/summarization/chunking.ts** — size estimation, segment grouping, and recursive reduce groups.
 - **src/summarization/pipeline.ts** — single-pass and map-and-synthesize execution.
@@ -107,7 +110,8 @@ Extend .gitignore without removing its existing entries:
 .env
 .pi/
 node_modules/
-.output/
+dist/
+dist-test/
 .wxt/
 coverage/
 playwright-report/
@@ -368,7 +372,7 @@ createRoot(document.getElementById("root")!).render(
 
 Run: **pnpm typecheck && pnpm build**
 
-Expected: both commands exit 0 and .output/chrome-mv3/manifest.json contains manifest_version 3, side_panel.default_path, options_ui, and minimum_chrome_version 114.
+Expected: both commands exit 0 and dist/chrome-mv3/manifest.json contains manifest_version 3, side_panel.default_path, options_ui, and minimum_chrome_version 114.
 
 - [ ] **Step 6: Commit the foundation**
 
@@ -625,7 +629,7 @@ import { parseSettings, validateCustomBaseUrl } from "../../src/domain/settings"
 
 it("accepts OpenAI settings and defaults context to 128000", () => {
   const settings = parseSettings({
-    provider: { kind: "openai", apiKey: "sk-test", model: "gpt-5.4-mini" }
+    provider: { kind: "openai", apiKey: "sk-test", model: "test-model" }
   });
   expect(settings.contextWindowTokens).toBe(128000);
 });
@@ -1177,7 +1181,7 @@ Expected: complete cached, navigation, interruption, and error behavior is indep
 
 **Interfaces:**
 - Produces: deterministic WXT_TEST_MODE build and Playwright extension fixture.
-- Consumes: built .output/chrome-mv3 package and all completed extension behavior.
+- Consumes: built test-mode dist-test/chrome-mv3 package and all completed extension behavior.
 
 - [ ] **Step 1: Configure a persistent Chromium extension fixture**
 
@@ -1268,7 +1272,7 @@ Expected: every command exits 0; production manifest has no localhost content-sc
 
 - [ ] **Step 6: Run and record the manual Chrome/Brave matrix**
 
-Load .output/chrome-mv3 as unpacked in current stable Chrome and Brave on macOS. Record exact versions and PASS/FAIL evidence in docs/manual-verification.md. Use dedicated low-limit test keys only for opt-in live smoke tests; do not record key values or raw authorization errors.
+Load dist/chrome-mv3 as unpacked in current stable Chrome and Brave on macOS. Record exact versions and PASS/FAIL evidence in docs/manual-verification.md. Use dedicated low-limit test keys only for opt-in live smoke tests; do not record key values or raw authorization errors.
 
 Expected: all acceptance rows pass or a concrete defect is filed and fixed before completion.
 

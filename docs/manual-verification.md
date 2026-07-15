@@ -1,0 +1,104 @@
+# Manual browser verification
+
+- **Verification date:** 2026-07-14
+- **Overall status:** PARTIAL — targeted Brave transcript regression passed; the full cross-browser matrix remains open
+- **Tester:** Codex, using the existing user Brave window through macOS accessibility/computer control
+- **Commit:** Feature-branch checkpoint containing this evidence; the exact reviewed head is recorded in the PR verification comment
+- **macOS version:** 26.1 (25B78)
+- **Google Chrome exact version:** Not recorded (`chrome://version`)
+- **Brave exact version:** 150.1.92.139
+
+This file is an evidence record, not a claim that the full browser matrix passed. Keep a row unchecked until every subcheck in that row is complete; targeted evidence may be recorded as **PARTIAL PASS** without claiming the remaining subchecks. Use `PASS`, `FAIL`, or `BLOCKED` only after performing the corresponding check; for failures, link or describe the filed defect without including credentials or raw authorization data.
+
+## Build under test
+
+From the repository root:
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Load the unpacked production directory:
+
+```text
+dist/chrome-mv3
+```
+
+In Chrome use `chrome://extensions`; in Brave use `brave://extensions`. Enable Developer mode, choose **Load unpacked**, and select `dist/chrome-mv3`. After rebuilding, click **Reload** for the extension before continuing.
+
+Record the build environment before testing:
+
+| Field | Evidence |
+| --- | --- |
+| Commit hash | Not recorded |
+| `node --version` | Not recorded |
+| `pnpm --version` | Not recorded |
+| `pnpm typecheck` result | NOT RUN |
+| `pnpm test` result | NOT RUN |
+| `pnpm build` result | NOT RUN |
+| Built manifest path and SHA-256 | Not recorded |
+
+## Test inputs
+
+Use public or explicitly authorized test videos. Do not record transcript content, API keys, authorization headers, or full provider error bodies.
+
+| Input | URL or fixture | Notes |
+| --- | --- | --- |
+| Human-captioned standard watch video | `https://www.youtube.com/watch?v=iG9CE55wbtY` | Reconfirm that a human caption track is still available immediately before the run. |
+| Automatic-caption standard watch video | `https://www.youtube.com/watch?v=Z1wrAhvanRU` | Reconfirm the automatic caption label immediately before the run; record the label, not transcript text. |
+| Video with no transcript | `https://www.youtube.com/watch?v=aqz-KE-bpKQ` | Reconfirm that YouTube provides neither usable timed text nor a transcript control; expected to show the non-retryable **No transcript available** state. |
+| Long captioned video | `https://www.youtube.com/watch?v=8mAITcNt710` | Reconfirm captions, then lower the configured context enough to force visible mapping progress. |
+| Current **In this video** transcript layout | `https://www.youtube.com/watch?v=etduwo9Lu3M` | Verified on 2026-07-14 with direct timed text returning no usable segments and 120 current `transcript-segment-view-model` rows available after automatic panel reveal. |
+| SPA navigation video A and video B | Not recorded | Both must be standard watch pages. |
+| Dedicated restricted live-provider key | Not recorded | Optional; record only provider/key label, never the value. |
+| Local rate-limit mock | Not recorded | Custom endpoint that returns HTTP 429 and a safe retry response. |
+
+## Chrome and Brave acceptance matrix
+
+Evidence can be a screenshot filename, screen recording timestamp, console capture with secrets redacted, or concise observation. Repeat each browser-dependent check in both browsers; do not infer a Brave result from Chrome or vice versa.
+
+| Done | Check | Chrome result | Brave result | Evidence / notes |
+| --- | --- | --- | --- | --- |
+| - [ ] | **Extension identity:** after rebuilding and reloading `dist/chrome-mv3`, verify the Play Notes icon appears crisply in the extensions page, toolbar/extensions menu, browser-supplied side-panel header, and the centered in-panel error state. Check both light and dark browser chrome where available. | NOT RUN | NOT RUN | Confirm that no `YS` placeholder remains. If the browser retains an old icon, remove and reload the same unpacked directory once before filing a defect. |
+| - [ ] | **OpenAI model catalog:** enter a dedicated OpenAI key, accept the disclosure, and verify the readable model chooser loads from the authenticated provider API; refresh it and save a selection without exposing the key or requiring a typed model ID. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **OpenRouter model catalog:** enter a dedicated OpenRouter key, accept the disclosure, and verify the readable compatible-text model chooser loads from the authenticated provider API; refresh it and save a selection without exposing the key or requiring a typed model ID. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Advanced model fallback:** enable **Use a model not shown**, verify an exact provider ID can be entered manually, then disable it and verify the API-backed chooser returns. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Human captions:** open the human-captioned watch page, click the action, and verify a complete summary identifies the selected human caption track. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Automatic captions:** summarize the automatic-caption video and verify the panel marks the caption track as automatic. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **No transcript:** open a video for which YouTube truly provides neither usable timed text nor a transcript control; verify **No transcript available** appears without a provider summary request. Distinguish this from the retryable **Transcript could not be read** state. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Automatic transcript reveal:** start with YouTube's transcript closed on a video whose direct caption-track path is unavailable, or use a controlled fixture. Start summarization and verify the extension opens the transcript automatically, reads it without a manual click, restores focus, and completes. Repeat while canceling and while navigating; verify no stale provider request, result, or cache entry. | NOT RUN | PARTIAL PASS | On Brave 150.1.92.139, rebuilt and reloaded `dist/chrome-mv3`, reloaded `etduwo9Lu3M` with its transcript closed, invoked the extension from the existing toolbar menu, observed automatic **In this video → Transcript** reveal, **Reading YouTube transcript**, and a completed timestamped summary generated at 2026-07-14 12:53 PDT. Cancellation and navigation subchecks remain open. |
+| - [ ] | **Long video:** use an appropriate reduced context setting or sufficiently long transcript; verify sequential mapping progress followed by synthesis and a complete summary. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Summary detail:** with the same captioned video, model, language, and context limit, save **Concise**, **Standard**, and **Detailed** in turn. Verify each value persists, each change causes a new generation rather than a cache hit, and the result follows the selected coverage style without invented or repeated content. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **SPA navigation:** start or complete video A, navigate in-page to video B, and verify A work is canceled/stale and A output never appears for B. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Invalid key:** save a dedicated invalid test key, run **Test connection** or summarize, and verify a safe credential error with a Settings recovery action and no raw provider body. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Rate-limited mock:** configure the validated local custom endpoint to return HTTP 429; verify bounded retry/recovery behavior and a safe rate-limit message. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Cache hit:** generate once, close and reopen the panel on the same video/settings, and verify the cached timestamp is shown and the provider request count does not increase. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Copy:** click **Copy**, verify the button reports **Copied**, and paste into a scratch editor to confirm overview, takeaways, sections, timestamps, and limitation text. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Timestamp seek:** click takeaway and section timestamps and verify the active matching YouTube player seeks to the expected times. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Action opening:** with a supported watch page active, click the real toolbar action and verify the native side panel opens. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Console errors:** inspect the service worker, side panel, options page, and YouTube content-script consoles through the complete flow; record unexpected errors or confirm none. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | **Credential and log inspection:** inspect extension storage, network request destinations, console output, and copied evidence; verify the key stays in local extension storage, is sent only to the selected provider, is absent from session job/cache records and logs, and cannot be revealed in the UI. | NOT RUN | NOT RUN | Not recorded |
+
+## Additional permission and clearing evidence
+
+These checks supplement the required matrix and should be recorded during the same pass.
+
+| Done | Check | Chrome result | Brave result | Evidence / notes |
+| --- | --- | --- | --- | --- |
+| - [ ] | Save a custom HTTPS provider and verify the browser prompt requests only its single validated origin, not blanket all-site runtime access. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Deny a custom-origin permission and verify the provider settings are not saved. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Click **Replace key**, enter a draft, then click **Cancel replacement** and verify the saved provider remains without revealing either key. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Click **Clear saved provider** and verify the provider configuration is removed while preferences and cached summaries remain. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Click **Clear summaries** and verify the local `summaryCache.v1` envelope has no entries. | NOT RUN | NOT RUN | Not recorded |
+| - [ ] | Turn caching off without clearing and verify old cache entries remain stored but are neither read nor updated. | NOT RUN | NOT RUN | Not recorded |
+
+## Final result
+
+- **Chrome:** NOT RUN
+- **Brave:** PARTIAL PASS — current transcript-layout extraction and complete summary generation verified; remaining matrix rows are still unclaimed
+- **Open defects or blockers:** Not recorded
+- **Evidence location:** Not recorded
