@@ -165,7 +165,7 @@ function phaseLabel(state: JobState, progress: PipelineProgress | null): string 
   if (state === "extracting_transcript") return "Reading YouTube transcript";
   if (progress?.phase === "mapping") return "Summarizing caption chunks";
   if (progress?.phase === "reducing") return "Combining chunk summaries";
-  return "Creating final summary";
+  return "Creating summary";
 }
 
 function progressLabel(progress: PipelineProgress | null): string {
